@@ -35,47 +35,59 @@ Columns should include at least: `Country`, `Year`, and your main variables.
 """)
 
 # ============================================
-# Section A: Visual Data Exploration
+# Section A: Visual Data Exploration (Updated with Dropdowns)
 # ============================================
 
 st.header("A. Visual Data Exploration")
 
-# Figure 1: Average Trends
-st.subheader("Figure 1: Average Trends of Key Variables")
-try:
-    avg_trends = data.groupby('Year')[['GDP', 'Tourism', 'Green_Bonds', 'CO2']].mean()
-    st.line_chart(avg_trends)
-except Exception as e:
-    st.warning(f"Cannot plot trends: {e}")
+# --- Dropdown selection for variable(s) ---
+numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
 
-# Figure 2: Boxplot for Country Distribution
-st.subheader("Figure 2: Cross-Sectional Distribution (Boxplot)")
-try:
-    fig, ax = plt.subplots()
-    sns.boxplot(x='Country', y='GDP', data=data, ax=ax)
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
-except Exception as e:
-    st.warning(f"Cannot plot boxplot: {e}")
+if not numeric_cols:
+    st.warning("No numeric variables found in your dataset.")
+else:
+    selected_vars = st.multiselect(
+        "Select variables to visualize:",
+        options=numeric_cols,
+        default=numeric_cols[:4] if len(numeric_cols) >= 4 else numeric_cols
+    )
 
-# Figure 3: Pairwise Scatter Matrix
-st.subheader("Figure 3: Pairwise Scatter Plots")
-try:
-    sns.set(style="ticks")
-    fig = sns.pairplot(data[['GDP', 'Tourism', 'Green_Bonds', 'CO2']])
-    st.pyplot(fig)
-except Exception as e:
-    st.warning(f"Cannot plot scatter matrix: {e}")
+    # --- Figure 1: Average Trends ---
+    st.subheader("Figure 1: Average Trends of Selected Variables (Over Time)")
+    try:
+        avg_trends = data.groupby('Year')[selected_vars].mean()
+        st.line_chart(avg_trends)
+    except Exception as e:
+        st.warning(f"Cannot plot trends: {e}")
 
-# Figure 4: Correlation Heatmap
-st.subheader("Figure 4: Correlation Heatmap")
-try:
-    corr = data[['GDP', 'Tourism', 'Green_Bonds', 'CO2']].corr()
-    fig, ax = plt.subplots()
-    sns.heatmap(corr, annot=True, cmap="coolwarm", center=0)
-    st.pyplot(fig)
-except Exception as e:
-    st.warning(f"Cannot generate correlation heatmap: {e}")
+    # --- Figure 2: Cross-Sectional Distribution (Boxplot) ---
+    st.subheader("Figure 2: Cross-Sectional Distribution by Country")
+    try:
+        selected_y = st.selectbox("Select variable for Boxplot", selected_vars)
+        fig, ax = plt.subplots()
+        sns.boxplot(x='Country', y=selected_y, data=data, ax=ax)
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+    except Exception as e:
+        st.warning(f"Cannot plot boxplot: {e}")
+
+    # --- Figure 3: Pairwise Scatter Matrix ---
+    st.subheader("Figure 3: Pairwise Scatter Plots (Matrix)")
+    try:
+        fig = sns.pairplot(data[selected_vars])
+        st.pyplot(fig)
+    except Exception as e:
+        st.warning(f"Cannot plot scatter matrix: {e}")
+
+    # --- Figure 4: Correlation Heatmap ---
+    st.subheader("Figure 4: Correlation Heatmap")
+    try:
+        corr = data[selected_vars].corr()
+        fig, ax = plt.subplots()
+        sns.heatmap(corr, annot=True, cmap="coolwarm", center=0)
+        st.pyplot(fig)
+    except Exception as e:
+        st.warning(f"Cannot generate correlation heatmap: {e}")
 
 # ============================================
 # Section B: Descriptive and Preliminary Tests
