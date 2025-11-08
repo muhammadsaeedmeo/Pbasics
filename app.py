@@ -38,51 +38,37 @@ Columns should include at least: `Country`, `Year`, and your main variables.
 # Section A: Visual Data Exploration (Updated with Dropdowns)
 # ============================================
 
-st.header("A. Visual Data Exploration")
+# ============================================
+# Correlation Heatmap with Dropdowns, Color Selection & Interpretation
+# ============================================
 
-# --- Dropdown selection for variable(s) ---
+import streamlit as st
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from io import BytesIO
+
+st.header("Correlation Heatmap")
+
+# --- Load your data here ---
+# data = pd.read_csv("your_data.csv")
+
+# Detect numeric columns
 numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
 
 if not numeric_cols:
     st.warning("No numeric variables found in your dataset.")
 else:
-    selected_vars = st.multiselect(
-        "Select variables to visualize:",
-        options=numeric_cols,
-        default=numeric_cols[:4] if len(numeric_cols) >= 4 else numeric_cols
+    # --- Dropdowns for selecting dependent & independent variables ---
+    dep_var = st.selectbox("Select Dependent Variable", options=numeric_cols)
+    indep_vars = st.multiselect(
+        "Select Independent Variable(s)",
+        options=[col for col in numeric_cols if col != dep_var],
+        default=[col for col in numeric_cols if col != dep_var][:3]
     )
 
-    # --- Figure 1: Average Trends ---
-    st.subheader("Figure 1: Average Trends of Selected Variables (Over Time)")
-    try:
-        avg_trends = data.groupby('Year')[selected_vars].mean()
-        st.line_chart(avg_trends)
-    except Exception as e:
-        st.warning(f"Cannot plot trends: {e}")
-
-    # --- Figure 2: Cross-Sectional Distribution (Boxplot) ---
-    st.subheader("Figure 2: Cross-Sectional Distribution by Country")
-    try:
-        selected_y = st.selectbox("Select variable for Boxplot", selected_vars)
-        fig, ax = plt.subplots()
-        sns.boxplot(x='Country', y=selected_y, data=data, ax=ax)
-        plt.xticks(rotation=45)
-        st.pyplot(fig)
-    except Exception as e:
-        st.warning(f"Cannot plot boxplot: {e}")
-
-    # --- Figure 3: Pairwise Scatter Matrix ---
-    st.subheader("Figure 3: Pairwise Scatter Plots (Matrix)")
-    try:
-        fig = sns.pairplot(data[selected_vars])
-        st.pyplot(fig)
-    except Exception as e:
-        st.warning(f"Cannot plot scatter matrix: {e}")
-
-       # --- Figure 4: Correlation Heatmap ---
-    st.subheader("Figure 4: Correlation Heatmap")
-
-    # Color palette selector
+    # --- Color palette selector ---
     color_option = st.selectbox(
         "Select Heatmap Color Palette",
         options=[
@@ -92,8 +78,12 @@ else:
         index=0
     )
 
-    try:
+    if indep_vars:
+        # --- Compute correlation matrix ---
+        selected_vars = [dep_var] + indep_vars
         corr = data[selected_vars].corr()
+
+        # --- Generate heatmap ---
         fig, ax = plt.subplots()
         sns.heatmap(
             corr,
@@ -105,8 +95,55 @@ else:
         )
         plt.title(f"Correlation Heatmap ({color_option} palette)")
         st.pyplot(fig)
-    except Exception as e:
-        st.warning(f"Cannot generate correlation heatmap: {e}")
+
+        # --- Add download button for heatmap image ---
+        buf = BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight")
+        st.download_button(
+            label="Download Heatmap Image",
+            data=buf.getvalue(),
+            file_name="correlation_heatmap.png",
+            mime="image/png"
+        )
+
+        # --- Interpret correlation results ---
+        st.subheader("Correlation Interpretation")
+
+        def interpret_corr(value):
+            val = abs(value)
+            if val < 0.20:
+                return "very weak"
+            elif val < 0.40:
+                return "weak"
+            elif val < 0.60:
+                return "moderate"
+            elif val < 0.80:
+                return "strong"
+            else:
+                return "very strong"
+
+        interpretation_text = ""
+        for var in indep_vars:
+            corr_value = corr.loc[dep_var, var]
+            strength = interpret_corr(corr_value)
+            direction = "positive" if corr_value > 0 else "negative"
+            interpretation_text += (
+                f"- The correlation between **{dep_var}** and **{var}** is "
+                f"**{corr_value:.2f}**, indicating a **{strength} {direction} relationship**.\n"
+            )
+
+        st.markdown(interpretation_text)
+
+        st.info(
+            "According to Evans (1996), correlation strengths are defined as: "
+            "very weak (0.00–0.19), weak (0.20–0.39), moderate (0.40–0.59), "
+            "strong (0.60–0.79), and very strong (0.80–1.00).\n\n"
+            "**Reference:** Evans, J. D. (1996). *Straightforward statistics for the behavioral sciences.* "
+            "Brooks/Cole Publishing."
+        )
+    else:
+        st.warning("Please select at least one independent variable to display correlation.")
+
 
 
 # ============================================
