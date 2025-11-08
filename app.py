@@ -35,10 +35,6 @@ Columns should include at least: `Country`, `Year`, and your main variables.
 """)
 
 # ============================================
-# Section A: Visual Data Exploration (Updated with Dropdowns)
-# ============================================
-
-# ============================================
 # Correlation Heatmap with Dropdowns, Color Selection & Interpretation
 # ============================================
 
@@ -150,7 +146,69 @@ try:
 except Exception as e:
     st.warning(f"Cannot compute correlation matrix: {e}")
 
+# ============================================
+# Slope Homogeneity Test (Pesaran and Yamagata, 2008)
+# ============================================
 
+st.subheader("Slope Homogeneity Test (Pesaran and Yamagata, 2008)")
+
+try:
+    import statsmodels.api as sm
+    import numpy as np
+    import pandas as pd
+
+    # Check required columns
+    if "Country" not in data.columns or "Year" not in data.columns:
+        st.warning("Please ensure your dataset includes 'Country' and 'Year' columns for panel data.")
+    else:
+        dep = dep_var
+        indeps = indep_vars
+
+        if not indeps:
+            st.warning("Please select independent variables first.")
+        else:
+            # Prepare data
+            panel_results = []
+            for country, subset in data.groupby("Country"):
+                if subset[dep].isnull().any() or subset[indeps].isnull().any().any():
+                    continue  # skip missing data
+                X = sm.add_constant(subset[indeps])
+                y = subset[dep]
+                model = sm.OLS(y, X).fit()
+                panel_results.append(model.params.values)
+
+            betas = np.vstack(panel_results)
+            mean_beta = np.mean(betas, axis=0)
+            N, k = betas.shape
+
+            # Compute Swamy test statistic components
+            S = np.sum((betas - mean_beta) ** 2, axis=0)
+            delta = N * np.sum(S) / np.sum(mean_beta ** 2)
+            delta_adj = (N * delta - k) / np.sqrt(2 * k)
+
+            # Display results
+            st.markdown(f"**Number of Cross-Sections (N):** {N}")
+            st.markdown(f"**Number of Parameters (k):** {k}")
+            st.markdown(f"**Delta Statistic:** {delta:.4f}")
+            st.markdown(f"**Adjusted Delta Statistic:** {delta_adj:.4f}")
+
+            # --- Interpretation line (simple language) ---
+            if abs(delta_adj) > 1.96:
+                st.success("✅ Slopes are *heterogeneous* across cross-sections — meaning the relationship differs among units.")
+                simple_result = "The regression slopes are **not the same** for all cross-sections."
+            else:
+                st.info("ℹ️ Slopes are *homogeneous* across cross-sections — meaning the relationship is broadly similar across units.")
+                simple_result = "The regression slopes are **similar** across cross-sections."
+
+            st.markdown(f"**Summary:** {simple_result}")
+
+            st.caption(
+                "Reference: Pesaran, M. H., & Yamagata, T. (2008). "
+                "Testing slope homogeneity in large panels. *Journal of Econometrics*, 142(1), 50–93."
+            )
+
+except Exception as e:
+    st.warning(f"Error running slope homogeneity test: {e}")
 
 # ============================================
 # Section D: Panel Cointegration Tests
