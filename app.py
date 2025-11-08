@@ -146,77 +146,129 @@ try:
 except Exception as e:
     st.warning(f"Cannot compute correlation matrix: {e}")
 
-# ============================================
-# Slope Homogeneity Test (Pesaran and Yamagata, 2008)
-# ============================================
+# ------------------------------
+# Improved Slope Homogeneity Test (variance-weighted)
+# ------------------------------
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+from scipy.stats import norm
 
-st.subheader("Slope Homogeneity Test (Pesaran and Yamagata, 2008)")
+# data: your DataFrame
+# dep_var: string name of dependent variable
+# indep_vars: list of independent variable names
 
+def pesaran_yamagata_test(data, dep_var, indep_vars, group_col="Country", verbose=False):
+    """
+    Variance-weighted Swamy / Pesaran-Yamagata style test.
+    Returns a dict with statistics and p-values.
+    NOTE: This is an approximate implementation that accounts for each unit's covariance matrix.
+    Cross-check against Stata/EViews for final reporting.
+    """
+
+    # Collect individual betas and V_i (cov matrices)
+    betas_list = []
+    V_list = []
+    ns = []  # observations per cross-section
+    units = []
+
+    for unit, sub in data.groupby(group_col):
+        # drop rows with missing values for relevant vars
+        sub = sub[[dep_var] + indep_vars].dropna()
+        if sub.shape[0] <= len(indep_vars):  # not enough obs to estimate
+            continue
+        y = sub[dep_var].values
+        X = sm.add_constant(sub[indep_vars]).values  # includes intercept
+        try:
+            res = sm.OLS(y, X).fit()
+        except Exception as e:
+            if verbose:
+                print(f"Skipping unit {unit} due to error: {e}")
+            continue
+
+        beta_i = res.params  # length k (includes constant)
+        cov_i = res.cov_params()  # k x k
+        if cov_i.shape[0] != len(beta_i):
+            # safety check
+            continue
+
+        betas_list.append(beta_i)
+        V_list.append(cov_i)
+        ns.append(sub.shape[0])
+        units.append(unit)
+
+    if len(betas_list) == 0:
+        raise ValueError("No cross-sections with estimable regressions.")
+
+    betas = np.vstack(betas_list)  # N x k
+    N, k = betas.shape
+    beta_bar = np.mean(betas, axis=0)  # k
+
+    # Compute weighted dispersion S_w = sum_i d_i' * W_i * d_i
+    # Choice of W_i: inverse of covariance (precision). If singular, use pseudo-inverse.
+    S_w = 0.0
+    for i in range(N):
+        d_i = (betas[i] - beta_bar).reshape(-1, 1)  # k x 1
+        V_i = V_list[i]
+        # Regularize / pseudo-inverse for numerical stability
+        try:
+            W_i = np.linalg.pinv(V_i)  # k x k
+        except Exception:
+            W_i = np.linalg.pinv(V_i + np.eye(k) * 1e-8)
+
+        S_w += float(d_i.T @ W_i @ d_i)  # scalar
+
+    # Basic Swamy statistic (variance-weighted)
+    # Many references define Swamy as S_w; Pesaran-Yamagata standardize it further.
+    S = S_w
+
+    # For standardization we need mean and variance of S under H0.
+    # Pesaran-Yamagata derive asymptotic normalization; a widely used simple standardization is:
+    # delta = (S - (N-1)*k) / sqrt(2*(N-1)*k)
+    # then delta_adj = sqrt(N) * delta  (or other small-sample corrections)
+    #
+    # Note: exact finite-sample constants differ in the literature; this is a practical standardization.
+    mean_S = (N - 1) * k
+    var_S = 2 * (N - 1) * k
+
+    delta = (S - mean_S) / np.sqrt(var_S)
+    # optional small-sample adjustment (Pesaran & Yamagata propose Δ and Δ_adj forms)
+    delta_adj = np.sqrt(N) * delta  # crude adjustment
+
+    p_delta = 2 * (1 - norm.cdf(abs(delta)))
+    p_delta_adj = 2 * (1 - norm.cdf(abs(delta_adj)))
+
+    # Return results
+    return {
+        "N": N,
+        "k": k,
+        "S_weighted": float(S),
+        "mean_S": float(mean_S),
+        "var_S": float(var_S),
+        "delta": float(delta),
+        "p_delta": float(p_delta),
+        "delta_adj": float(delta_adj),
+        "p_delta_adj": float(p_delta_adj),
+        "units_used": units
+    }
+
+# Example usage inside your app:
 try:
-    import statsmodels.api as sm
-    import numpy as np
-    import pandas as pd
-
-    # Check required columns
-    if "Country" not in data.columns or "Year" not in data.columns:
-        st.warning("Please ensure your dataset includes 'Country' and 'Year' columns for panel data.")
+    res_py = pesaran_yamagata_test(data, dep_var, indep_vars, group_col="Country")
+    # Display table as you like
+    results_df = pd.DataFrame({
+        "Statistic": ["S_weighted", "mean_S", "var_S", "delta", "delta_adj"],
+        "Value": [res_py["S_weighted"], res_py["mean_S"], res_py["var_S"], res_py["delta"], res_py["delta_adj"]],
+        "p-value": ["", "", "", f"{res_py['p_delta']:.3f}", f"{res_py['p_delta_adj']:.3f}"]
+    })
+    st.dataframe(results_df)
+    if res_py["p_delta_adj"] < 0.05:
+        st.success("Reject null: slopes are heterogeneous across cross-sections (weighted test).")
     else:
-        dep = dep_var
-        indeps = indep_vars
-
-        if not indeps:
-            st.warning("Please select independent variables first.")
-        else:
-            # Prepare data by country
-            panel_results = []
-            for country, subset in data.groupby("Country"):
-                if subset[dep].isnull().any() or subset[indeps].isnull().any().any():
-                    continue  # skip missing data
-                X = sm.add_constant(subset[indeps])
-                y = subset[dep]
-                model = sm.OLS(y, X).fit()
-                panel_results.append(model.params.values)
-
-            betas = np.vstack(panel_results)
-            mean_beta = np.mean(betas, axis=0)
-            N, k = betas.shape
-
-            # Compute test statistics
-            S = np.sum((betas - mean_beta) ** 2, axis=0)
-            delta = N * np.sum(S) / np.sum(mean_beta ** 2)
-            delta_adj = (N * delta - k) / np.sqrt(2 * k)
-
-            # Compute p-values (two-tailed from normal distribution)
-            from scipy.stats import norm
-            p_delta = 2 * (1 - norm.cdf(abs(delta)))
-            p_delta_adj = 2 * (1 - norm.cdf(abs(delta_adj)))
-
-            # Create a nice result table
-            results_df = pd.DataFrame({
-                "Statistic": ["Δ", "Δ_adj"],
-                "Value": [round(delta, 3), round(delta_adj, 3)],
-                "p-value": [f"{p_delta:.3f}", f"{p_delta_adj:.3f}"]
-            })
-
-            st.write("**Slope Homogeneity Test Results**")
-            st.dataframe(results_df, use_container_width=True)
-
-            # Simple interpretation line
-            if p_delta_adj < 0.05:
-                st.success("Reject the null hypothesis — slopes are *heterogeneous* across cross-sections.")
-                st.markdown("**Interpretation:** The regression slopes are not the same for all cross-sections.")
-            else:
-                st.info("Fail to reject the null hypothesis — slopes are *homogeneous* across cross-sections.")
-                st.markdown("**Interpretation:** The regression slopes are broadly similar across cross-sections.")
-
-            # Reference
-            st.caption(
-                "Reference: Pesaran, M. H., & Yamagata, T. (2008). "
-                "Testing slope homogeneity in large panels. *Journal of Econometrics*, 142(1), 50–93."
-            )
-
+        st.info("Fail to reject null: slopes are homogeneous across cross-sections (weighted test).")
 except Exception as e:
-    st.warning(f"Error running slope homogeneity test: {e}")
+    st.warning(f"Error running weighted slope homogeneity test: {e}")
+
 
 # ============================================
 # Section E: Method of Moments Quantile Regression (MMQR)
