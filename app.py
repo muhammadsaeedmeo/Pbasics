@@ -714,71 +714,111 @@ from statsmodels.tsa.stattools import grangercausalitytests
 # Section F: Granger Causality Tests
 # ============================================
 
+# ============================================
+# Section F: Granger Causality Tests
+# ============================================
+
 st.header("F. Granger Causality Tests")
-st.markdown("### Placeholder: Panel Granger Causality (Dumitrescu & Hurlin, 2012)")
 
-# --- 1. Static Panel Granger Causality Results (Your original placeholder, slightly improved) ---
-# NOTE: Replace these hardcoded values with your *actual* Dumitrescu & Hurlin results
-granger_dh_df = pd.DataFrame({
-    "Null Hypothesis": ["Tourism does not Granger cause GDP (H0)", "GDP does not Granger cause Tourism (H0)"],
-    "W-bar Statistic": [4.21, 2.87], # D-H Test Statistic is W-bar
-    "p-value": [0.001, 0.015],
-    "Decision (at 5% level)": ["Reject H0", "Reject H0"]
-})
-
-st.subheader("Aggregated Panel Results (Dumitrescu & Hurlin, 2012)")
-st.dataframe(granger_dh_df)
-
-st.markdown("---")
-
-# --- 2. Example: Running Standard Granger Causality for one country (Illustrative) ---
-
-st.markdown("### Illustrative Example: Standard Granger Causality for a Single Unit")
-
-# ⚠️ NOTE: Replace this mock data generation with your actual data loading and country selection
-# Example Data Generation (Replace this with your actual data)
-np.random.seed(42)
-T = 50  # Time periods
-gdp_series = np.cumsum(np.random.randn(T)) + 50
-tourism_series = 0.5 * np.roll(gdp_series, 1) + np.random.randn(T) * 2 + 10
-# Combine the two series into a DataFrame
-data_single_unit = pd.DataFrame({
-    'GDP': gdp_series,
-    'Tourism': tourism_series
-})
-
-st.write("**Running Test on Illustrative Data (Lag=4):**")
-
-# Run the standard (non-panel) Granger Causality test
-# The test needs the data in a specific order: [y, x] where the test is 'x does not Granger cause y'
-max_lag = 4
-
-# Test 1: Tourism (x) does not Granger cause GDP (y)
-st.markdown("**Test 1: Tourism does not Granger cause GDP**")
-# Data is passed as [y, x] -> [GDP, Tourism]
-gc_result_gdp = grangercausalitytests(data_single_unit[['GDP', 'Tourism']], max_lag, verbose=False)
-p_value_gdp = gc_result_gdp[max_lag][0]['ssr_chi2test'][1]
-
-st.markdown(f"**P-value (Chi2 Test at Lag {max_lag}):** **{p_value_gdp:.4f}**")
-if p_value_gdp < 0.05:
-    st.success("Decision: Reject H0 (Tourism *does* Granger cause GDP at 5% level)")
-else:
-    st.error("Decision: Fail to Reject H0 (Tourism does not Granger cause GDP at 5% level)")
-
-
-st.markdown("---")
-
-# Test 2: GDP (x) does not Granger cause Tourism (y)
-st.markdown("**Test 2: GDP does not Granger cause Tourism**")
-# Data is passed as [y, x] -> [Tourism, GDP]
-gc_result_tourism = grangercausalitytests(data_single_unit[['Tourism', 'GDP']], max_lag, verbose=False)
-p_value_tourism = gc_result_tourism[max_lag][0]['ssr_chi2test'][1]
-
-st.markdown(f"**P-value (Chi2 Test at Lag {max_lag}):** **{p_value_tourism:.4f}**")
-if p_value_tourism < 0.05:
-    st.success("Decision: Reject H0 (GDP *does* Granger cause Tourism at 5% level)")
-else:
-    st.error("Decision: Fail to Reject H0 (GDP does not Granger cause Tourism at 5% level)")
+try:
+    # Check if we have the required data
+    if 'df' not in locals() and 'df' not in globals():
+        st.warning("Please load data in Section A first")
+    else:
+        # Ensure we have the required columns
+        required_cols = ['GDP', 'Tourism']
+        if all(col in df.columns for col in required_cols):
+            
+            # Perform actual Granger causality tests
+            from statsmodels.tsa.stattools import grangercausalitytests
+            import numpy as np
+            
+            # Prepare data for Granger test (ensure stationarity)
+            # Remove missing values and ensure numeric data
+            test_data = df[['GDP', 'Tourism']].dropna()
+            test_data = test_data.apply(pd.to_numeric, errors='coerce').dropna()
+            
+            # Perform Granger causality tests with maxlag
+            maxlag = 2  # You can adjust this based on your data
+            
+            st.subheader("Tourism → GDP Granger Causality")
+            try:
+                # Test: Tourism causes GDP
+                gc_result1 = grangercausalitytests(test_data[['GDP', 'Tourism']], maxlag=maxlag, verbose=False)
+                
+                # Extract p-values for each lag
+                p_values1 = []
+                for lag in range(1, maxlag + 1):
+                    p_value = gc_result1[lag][0]['ssr_chi2test'][1]
+                    p_values1.append(p_value)
+                
+                # Display results
+                best_lag1 = np.argmin(p_values1) + 1
+                best_p1 = p_values1[best_lag1 - 1]
+                
+                st.write(f"**Best lag:** {best_lag1}")
+                st.write(f"**p-value:** {best_p1:.4f}")
+                st.write(f"**Decision:** {'Reject H0 - Causality exists' if best_p1 < 0.05 else 'Cannot reject H0 - No causality'}")
+                
+            except Exception as e:
+                st.error(f"Error in Tourism→GDP test: {str(e)}")
+            
+            st.subheader("GDP → Tourism Granger Causality")
+            try:
+                # Test: GDP causes Tourism
+                gc_result2 = grangercausalitytests(test_data[['Tourism', 'GDP']], maxlag=maxlag, verbose=False)
+                
+                # Extract p-values for each lag
+                p_values2 = []
+                for lag in range(1, maxlag + 1):
+                    p_value = gc_result2[lag][0]['ssr_chi2test'][1]
+                    p_values2.append(p_value)
+                
+                # Display results
+                best_lag2 = np.argmin(p_values2) + 1
+                best_p2 = p_values2[best_lag2 - 1]
+                
+                st.write(f"**Best lag:** {best_lag2}")
+                st.write(f"**p-value:** {best_p2:.4f}")
+                st.write(f"**Decision:** {'Reject H0 - Causality exists' if best_p2 < 0.05 else 'Cannot reject H0 - No causality'}")
+                
+            except Exception as e:
+                st.error(f"Error in GDP→Tourism test: {str(e)}")
+            
+            # Summary table
+            st.subheader("Summary Table")
+            granger_summary = pd.DataFrame({
+                "Null Hypothesis": [
+                    "Tourism does not Granger cause GDP", 
+                    "GDP does not Granger cause Tourism"
+                ],
+                "Best Lag": [best_lag1, best_lag2],
+                "p-value": [f"{best_p1:.4f}", f"{best_p2:.4f}"],
+                "Decision": [
+                    "Reject H0" if best_p1 < 0.05 else "Fail to reject H0",
+                    "Reject H0" if best_p2 < 0.05 else "Fail to reject H0"
+                ]
+            })
+            
+            st.dataframe(granger_summary)
+            
+            # Interpretation
+            st.subheader("Interpretation")
+            if best_p1 < 0.05 and best_p2 < 0.05:
+                st.info("**Bidirectional causality**: Both Tourism and GDP Granger-cause each other")
+            elif best_p1 < 0.05:
+                st.info("**Unidirectional causality**: Tourism Granger-causes GDP, but not vice versa")
+            elif best_p2 < 0.05:
+                st.info("**Unidirectional causality**: GDP Granger-causes Tourism, but not vice versa")
+            else:
+                st.info("**No causality**: No Granger causality relationship detected")
+                
+        else:
+            st.error(f"Required columns not found. Please ensure your data has: {required_cols}")
+            
+except Exception as e:
+    st.error(f"Error in Granger causality tests: {str(e)}")
+    st.info("Make sure your data is stationary and has sufficient observations")
 # ============================================
 # Section G: Diagnostics
 # ============================================
