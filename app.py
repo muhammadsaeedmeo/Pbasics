@@ -219,18 +219,6 @@ except Exception as e:
     st.warning(f"Error running slope homogeneity test: {e}")
 
 # ============================================
-# Section D: Panel Cointegration Tests
-# ============================================
-
-st.header("D. Panel Cointegration Tests (Pedroni, Westerlund)")
-cointegration_results = pd.DataFrame({
-    "Test": ["Pedroni (2004)", "Westerlund (2007)"],
-    "Statistic": [-3.42, -2.97],
-    "p-value": [0.001, 0.004]
-})
-st.dataframe(cointegration_results)
-
-# ============================================
 # Section E: Method of Moments Quantile Regression (MMQR)
 # ============================================
 
