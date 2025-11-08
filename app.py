@@ -700,172 +700,85 @@ if data is not None:
 
 else:
     st.warning("Please upload your dataset to proceed.")
-# ============================================
-# Section F: Granger Causality (Placeholder)
-# ============================================
 
 # ============================================
 # Section F: Granger Causality Tests (Dumitrescu & Hurlin, 2012)
 # ============================================
 
-st.header("F. Granger Causality Tests (Dumitrescu & Hurlin, 2012)")
+import streamlit as st
+import pandas as pd
+import numpy as np
+from statsmodels.tsa.stattools import grangercausalitytests
 
-st.markdown("""
-This section tests the causal relationships between tourism and GDP using panel Granger causality.
-The test determines whether past values of one variable help predict another variable.
-""")
+# ============================================
+# Section F: Granger Causality Tests
+# ============================================
 
-# Note: For actual implementation, you would use:
-# from statsmodels.tsa.stattools import grangercausalitytests
-# However, for panel data, you may need specialized packages or manual implementation
+st.header("F. Granger Causality Tests")
+st.markdown("### Placeholder: Panel Granger Causality (Dumitrescu & Hurlin, 2012)")
 
-try:
-    # Example lag selection information
-    st.subheader("Model Specification")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Optimal Lag Order", "2", help="Selected based on AIC/BIC criteria")
-    with col2:
-        st.metric("Panel Dimension", f"{len(df['Country'].unique())} countries")
-    
-    # Granger Causality Results
-    st.subheader("Granger Causality Test Results")
-    
-    granger_df = pd.DataFrame({
-        "Null Hypothesis": [
-            "Tourism does not Granger cause GDP", 
-            "GDP does not Granger cause Tourism"
-        ],
-        "W-bar Statistic": [4.21, 2.87],
-        "Z-bar Statistic": [3.45, 2.12],
-        "p-value": [0.001, 0.015],
-        "Decision (α=0.05)": ["Reject H₀", "Reject H₀"],
-        "Interpretation": ["Tourism causes GDP", "GDP causes Tourism"]
-    })
-    
-    st.dataframe(
-        granger_df.style.highlight_max(subset=['W-bar Statistic', 'Z-bar Statistic'], color='lightblue')
-        .format({'p-value': '{:.4f}', 'W-bar Statistic': '{:.3f}', 'Z-bar Statistic': '{:.3f}'}),
-        use_container_width=True
-    )
-    
-    # Interpretation
-    st.subheader("Interpretation")
-    st.markdown("""
-    **Key Findings:**
-    
-    1. **Tourism → GDP (p = 0.001)**: 
-       - Strong evidence that tourism Granger-causes GDP growth
-       - Past values of tourism significantly predict future GDP
-       - Suggests tourism development leads to economic growth
-    
-    2. **GDP → Tourism (p = 0.015)**:
-       - Significant evidence that GDP Granger-causes tourism
-       - Past economic growth predicts future tourism development
-       - Indicates a feedback mechanism
-    
-    3. **Bidirectional Causality**:
-       - Both null hypotheses are rejected
-       - Suggests a mutually reinforcing relationship
-       - Tourism and GDP have a dynamic, reciprocal relationship
-    """)
-    
-    # Visualization
-    st.subheader("Causal Relationship Diagram")
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Create a simple diagram
-    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
-    
-    # Draw boxes
-    tourism_box = FancyBboxPatch((1, 2), 2, 1, boxstyle="round,pad=0.1", 
-                                  edgecolor='blue', facecolor='lightblue', linewidth=2)
-    gdp_box = FancyBboxPatch((6, 2), 2, 1, boxstyle="round,pad=0.1", 
-                             edgecolor='green', facecolor='lightgreen', linewidth=2)
-    
-    ax.add_patch(tourism_box)
-    ax.add_patch(gdp_box)
-    
-    # Add text
-    ax.text(2, 2.5, 'TOURISM', ha='center', va='center', fontsize=14, fontweight='bold')
-    ax.text(7, 2.5, 'GDP', ha='center', va='center', fontsize=14, fontweight='bold')
-    
-    # Draw arrows with p-values
-    # Tourism -> GDP
-    arrow1 = FancyArrowPatch((3.2, 2.7), (5.8, 2.7), 
-                            arrowstyle='->', mutation_scale=30, linewidth=2.5, color='blue')
-    ax.add_patch(arrow1)
-    ax.text(4.5, 3.1, 'p = 0.001***', ha='center', fontsize=11, color='blue', fontweight='bold')
-    
-    # GDP -> Tourism
-    arrow2 = FancyArrowPatch((5.8, 2.3), (3.2, 2.3), 
-                            arrowstyle='->', mutation_scale=30, linewidth=2.5, color='green')
-    ax.add_patch(arrow2)
-    ax.text(4.5, 1.9, 'p = 0.015**', ha='center', fontsize=11, color='green', fontweight='bold')
-    
-    ax.set_xlim(0, 9)
-    ax.set_ylim(1, 4)
-    ax.axis('off')
-    ax.set_title('Bidirectional Granger Causality', fontsize=16, fontweight='bold', pad=20)
-    
-    # Add legend
-    ax.text(4.5, 1.3, '*** p < 0.01, ** p < 0.05', ha='center', fontsize=10, style='italic')
-    
-    st.pyplot(fig)
-    plt.close()
-    
-    # Statistical Details
-    with st.expander("📊 Statistical Details"):
-        st.markdown("""
-        **Test Methodology:**
-        - **Test**: Dumitrescu & Hurlin (2012) Panel Granger Causality Test
-        - **Lag Order**: 2 (selected via information criteria)
-        - **Null Hypothesis**: Variable X does not Granger-cause variable Y
-        - **W-bar Statistic**: Average of individual Wald statistics across panels
-        - **Z-bar Statistic**: Standardized version of W-bar for inference
-        
-        **Decision Rule:**
-        - If p-value < 0.05: Reject H₀ (evidence of Granger causality)
-        - If p-value ≥ 0.05: Fail to reject H₀ (no evidence of causality)
-        
-        **Note**: Granger causality tests predictive relationships, not true causation.
-        """)
-    
-    # Policy Implications
-    with st.expander("💡 Policy Implications"):
-        st.markdown("""
-        **For Policymakers:**
-        
-        1. **Tourism Investment**: Tourism development can stimulate GDP growth
-        2. **Economic Development**: Economic growth attracts more tourism
-        3. **Integrated Strategy**: Policies should address both sectors simultaneously
-        4. **Resource Allocation**: Justify tourism infrastructure investments
-        5. **Sustainable Growth**: Balance tourism growth with economic development
-        """)
-    
-    # Download results
-    st.subheader("Export Results")
-    csv = granger_df.to_csv(index=False)
-    st.download_button(
-        label="📥 Download Granger Causality Results (CSV)",
-        data=csv,
-        file_name="granger_causality_results.csv",
-        mime="text/csv"
-    )
+# --- 1. Static Panel Granger Causality Results (Your original placeholder, slightly improved) ---
+# NOTE: Replace these hardcoded values with your *actual* Dumitrescu & Hurlin results
+granger_dh_df = pd.DataFrame({
+    "Null Hypothesis": ["Tourism does not Granger cause GDP (H0)", "GDP does not Granger cause Tourism (H0)"],
+    "W-bar Statistic": [4.21, 2.87], # D-H Test Statistic is W-bar
+    "p-value": [0.001, 0.015],
+    "Decision (at 5% level)": ["Reject H0", "Reject H0"]
+})
 
-except Exception as e:
-    st.error(f"Error in Granger Causality analysis: {str(e)}")
-    st.info("Please ensure your data contains the required variables and has sufficient observations.")
+st.subheader("Aggregated Panel Results (Dumitrescu & Hurlin, 2012)")
+st.dataframe(granger_dh_df)
 
-# Add a note about actual implementation
-st.info("""
-**Implementation Note**: The results shown are illustrative. For actual analysis, 
-implement the Dumitrescu-Hurlin test using specialized econometric packages or 
-calculate the test statistics manually following the methodology in:
-Dumitrescu, E. I., & Hurlin, C. (2012). Testing for Granger non-causality in heterogeneous panels. 
-Economic modelling, 29(4), 1450-1460.
-""")
+st.markdown("---")
+
+# --- 2. Example: Running Standard Granger Causality for one country (Illustrative) ---
+
+st.markdown("### Illustrative Example: Standard Granger Causality for a Single Unit")
+
+# ⚠️ NOTE: Replace this mock data generation with your actual data loading and country selection
+# Example Data Generation (Replace this with your actual data)
+np.random.seed(42)
+T = 50  # Time periods
+gdp_series = np.cumsum(np.random.randn(T)) + 50
+tourism_series = 0.5 * np.roll(gdp_series, 1) + np.random.randn(T) * 2 + 10
+# Combine the two series into a DataFrame
+data_single_unit = pd.DataFrame({
+    'GDP': gdp_series,
+    'Tourism': tourism_series
+})
+
+st.write("**Running Test on Illustrative Data (Lag=4):**")
+
+# Run the standard (non-panel) Granger Causality test
+# The test needs the data in a specific order: [y, x] where the test is 'x does not Granger cause y'
+max_lag = 4
+
+# Test 1: Tourism (x) does not Granger cause GDP (y)
+st.markdown("**Test 1: Tourism does not Granger cause GDP**")
+# Data is passed as [y, x] -> [GDP, Tourism]
+gc_result_gdp = grangercausalitytests(data_single_unit[['GDP', 'Tourism']], max_lag, verbose=False)
+p_value_gdp = gc_result_gdp[max_lag][0]['ssr_chi2test'][1]
+
+st.markdown(f"**P-value (Chi2 Test at Lag {max_lag}):** **{p_value_gdp:.4f}**")
+if p_value_gdp < 0.05:
+    st.success("Decision: Reject H0 (Tourism *does* Granger cause GDP at 5% level)")
+else:
+    st.error("Decision: Fail to Reject H0 (Tourism does not Granger cause GDP at 5% level)")
+
+
+st.markdown("---")
+
+# Test 2: GDP (x) does not Granger cause Tourism (y)
+st.markdown("**Test 2: GDP does not Granger cause Tourism**")
+# Data is passed as [y, x] -> [Tourism, GDP]
+gc_result_tourism = grangercausalitytests(data_single_unit[['Tourism', 'GDP']], max_lag, verbose=False)
+p_value_tourism = gc_result_tourism[max_lag][0]['ssr_chi2test'][1]
+
+st.markdown(f"**P-value (Chi2 Test at Lag {max_lag}):** **{p_value_tourism:.4f}**")
+if p_value_tourism < 0.05:
+    st.success("Decision: Reject H0 (GDP *does* Granger cause Tourism at 5% level)")
+else:
+    st.error("Decision: Fail to Reject H0 (GDP does not Granger cause Tourism at 5% level)")
 # ============================================
 # Section G: Diagnostics
 # ============================================
