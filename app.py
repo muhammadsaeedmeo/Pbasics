@@ -633,109 +633,381 @@ else:
 # Section F: Panel Granger Causality Test
 # ============================================
 
-st.header("F. Panel Granger Causality Test")
+# ============================================
+# Section E: Quantile Cointegration Test
+# ============================================
+
+st.header("E. Quantile Cointegration Test")
 
 try:
-    # Check for required variables
-    if 'GDP' not in df.columns or 'Tourism' not in df.columns:
-        st.warning("GDP and/or Tourism columns not found. Using available numeric variables.")
-        available_vars = [col for col in ['GDP', 'Tourism'] if col in df.columns]
-        if len(available_vars) < 2:
-            numeric_vars = df.select_dtypes(include=[np.number]).columns.tolist()
-            if len(numeric_vars) >= 2:
-                var1, var2 = st.selectbox("Select first variable", numeric_vars), st.selectbox("Select second variable", 
-                                                                                           [v for v in numeric_vars if v != var1])
+    # Check if we have the required variables
+    if 'dep_var' not in locals() or 'indep_vars' not in locals() or not indep_vars:
+        st.warning("Please complete the MMQR analysis first to select variables.")
+    else:
+        st.subheader("Quantile Cointegration Configuration")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            coint_quantiles = st.text_input("Cointegration Quantiles (comma-separated)", 
+                                          "0.05,0.25,0.50,0.75,0.95", key="coint_quantiles")
+            coint_quantiles = [float(q.strip()) for q in coint_quantiles.split(",")]
+        
+        with col2:
+            max_lags_coint = st.slider("Maximum Lags for Cointegration Test", 1, 5, 2, key="coint_lags")
+            significance_level = st.selectbox("Significance Level", [0.01, 0.05, 0.10], index=1)
+        
+        # Quantile Cointegration Test Implementation
+        def quantile_cointegration_test(data, y_var, x_vars, quantiles, max_lags):
+            """
+            Quantile Cointegration Test based on Xiao (2009) and related approaches
+            """
+            results = {}
+            residual_tests = {}
+            
+            # Ensure panel data structure
+            if 'Country' in data.columns and 'Year' in data.columns:
+                # Use first country for demonstration (or pool data)
+                country_data = data[data['Country'] == data['Country'].iloc[0]].sort_values('Year')
+                test_data = country_data[[y_var] + x_vars].dropna()
             else:
-                st.error("Need at least 2 numeric variables for Granger causality test")
-                st.stop()
-        else:
-            var1, var2 = available_vars[0], available_vars[1]
-    else:
-        var1, var2 = 'GDP', 'Tourism'
-
-    # Lag selection
-    max_lag = st.slider("Select maximum lag for Granger test", 1, 5, 2)
-
-    # Prepare panel data for Granger test
-    def prepare_panel_data(df, var1, var2):
-        """Prepare panel data for Granger causality testing"""
-        countries = df['Country'].unique()
-        results = {}
+                test_data = data[[y_var] + x_vars].dropna()
+            
+            if len(test_data) < max_lags + 5:
+                st.warning("Insufficient data for cointegration test. Need more time periods.")
+                return results, residual_tests
+            
+            for q in quantiles:
+                try:
+                    # Step 1: Quantile regression for long-run relationship
+                    formula = f"{y_var} ~ {' + '.join(x_vars)}"
+                    q_model = quantreg(formula, test_data).fit(q=q)
+                    
+                    # Step 2: Get residuals from quantile regression
+                    residuals = q_model.resid
+                    
+                    # Step 3: Test residuals for stationarity (ADF test)
+                    from statsmodels.tsa.stattools import adfuller
+                    
+                    # ADF test on residuals
+                    adf_result = adfuller(residuals, maxlag=max_lags, autolag='AIC')
+                    
+                    # Store results
+                    results[q] = {
+                        'quantile': q,
+                        'adf_statistic': adf_result[0],
+                        'p_value': adf_result[1],
+                        'critical_values': adf_result[4],
+                        'residuals': residuals,
+                        'coefficients': q_model.params,
+                        'model': q_model
+                    }
+                    
+                    # Additional residual diagnostics
+                    from statsmodels.stats.diagnostic import acorr_ljungbox
+                    lb_test = acorr_ljungbox(residuals, lags=[max_lags], return_df=True)
+                    
+                    residual_tests[q] = {
+                        'ljung_box_stat': lb_test.iloc[0]['lb_stat'],
+                        'ljung_box_pval': lb_test.iloc[0]['lb_pvalue'],
+                        'residual_mean': np.mean(residuals),
+                        'residual_std': np.std(residuals)
+                    }
+                    
+                except Exception as e:
+                    st.warning(f"Quantile cointegration test failed for quantile {q}: {str(e)}")
+                    continue
+            
+            return results, residual_tests
         
-        for country in countries:
-            country_data = df[df['Country'] == country].sort_values('Year')
-            if len(country_data) > max_lag + 1:  # Need enough observations
-                # Check for stationarity (basic check - constant mean and variance)
-                data_subset = country_data[[var1, var2]].dropna()
-                if len(data_subset) > max_lag + 1:
-                    results[country] = data_subset
-        return results
-
-    panel_data = prepare_panel_data(df, var1, var2)
-    
-    if len(panel_data) < 2:
-        st.warning(f"Insufficient data for Granger causality test. Need at least 2 countries with sufficient time series data.")
-    else:
-        st.info(f"Testing Granger causality between {var1} and {var2} using {len(panel_data)} countries")
+        # Run quantile cointegration test
+        st.info("Running Quantile Cointegration Tests...")
+        coint_results, residual_tests = quantile_cointegration_test(
+            df, dep_var, indep_vars, coint_quantiles, max_lags_coint
+        )
         
-        # Perform Granger tests
-        direction1_pvals = []
-        direction2_pvals = []
-        
-        for country, data in panel_data.items():
-            try:
-                # Test: var1 does not Granger cause var2
-                test1 = grangercausalitytests(data[[var2, var1]], maxlag=max_lag, verbose=False)
-                pval1 = test1[max_lag][0]['ssr_chi2test'][1]
-                direction1_pvals.append(pval1)
+        if coint_results:
+            # ========================
+            # Table 1: Cointegration Test Results
+            # ========================
+            st.subheader("Table 5: Quantile Cointegration Test Results")
+            
+            coint_data = []
+            for q in coint_quantiles:
+                if q in coint_results:
+                    result = coint_results[q]
+                    critical_vals = result['critical_values']
+                    
+                    # Determine cointegration decision
+                    is_cointegrated = result['p_value'] < significance_level
+                    
+                    coint_data.append({
+                        'Quantile (τ)': f"{q:.2f}",
+                        'ADF Statistic': f"{result['adf_statistic']:.3f}",
+                        'P-Value': f"{result['p_value']:.3f}",
+                        '1% Critical': f"{critical_vals['1%']:.3f}",
+                        '5% Critical': f"{critical_vals['5%']:.3f}",
+                        '10% Critical': f"{critical_vals['10%] if '10%' in critical_vals else critical_vals.get('10%', 'N/A')}",
+                        'Cointegrated': 'Yes' if is_cointegrated else 'No'
+                    })
+            
+            coint_df = pd.DataFrame(coint_data)
+            st.dataframe(coint_df, use_container_width=True)
+            
+            # ========================
+            # Table 2: Long-run Coefficients
+            # ========================
+            st.subheader("Table 6: Long-run Coefficients from Quantile Cointegration")
+            
+            coef_data = []
+            coef_names = coint_results[coint_quantiles[0]]['coefficients'].index.tolist()
+            
+            for var in coef_names:
+                var_name = 'Intercept' if var == 'Intercept' else var
+                row = {'Variable': var_name}
                 
-                # Test: var2 does not Granger cause var1  
-                test2 = grangercausalitytests(data[[var1, var2]], maxlag=max_lag, verbose=False)
-                pval2 = test2[max_lag][0]['ssr_chi2test'][1]
-                direction2_pvals.append(pval2)
-            except:
-                continue
-
-        if direction1_pvals and direction2_pvals:
-            # Calculate combined p-values using Fisher's method
-            chi2_1 = -2 * np.sum(np.log(direction1_pvals))
-            chi2_2 = -2 * np.sum(np.log(direction2_pvals))
+                for q in coint_quantiles:
+                    if q in coint_results:
+                        coef = coint_results[q]['coefficients'][var]
+                        row[f'τ = {q}'] = f"{coef:.3f}"
+                
+                coef_data.append(row)
             
-            combined_p1 = 1 - stats.chi2.cdf(chi2_1, 2 * len(direction1_pvals))
-            combined_p2 = 1 - stats.chi2.cdf(chi2_2, 2 * len(direction2_pvals))
+            coef_df = pd.DataFrame(coef_data)
+            st.dataframe(coef_df, use_container_width=True)
             
-            # Create results table
-            granger_results = pd.DataFrame({
-                "Null Hypothesis": [
-                    f"{var1} does not Granger cause {var2}",
-                    f"{var2} does not Granger cause {var1}"
-                ],
-                "Countries Tested": [len(direction1_pvals), len(direction2_pvals)],
-                "Combined p-value": [f"{combined_p1:.4f}", f"{combined_p2:.4f}"],
-                "Decision": [
-                    "Reject H0" if combined_p1 < 0.05 else "Fail to reject H0",
-                    "Reject H0" if combined_p2 < 0.05 else "Fail to reject H0"
-                ]
-            })
+            # ========================
+            # Visualization: Cointegration Results
+            # ========================
+            st.subheader("Figure 2: Quantile Cointegration Analysis")
             
-            st.dataframe(granger_results)
+            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
             
+            # Plot 1: ADF Statistics across quantiles
+            quantiles_plot = [q for q in coint_quantiles if q in coint_results]
+            adf_stats = [coint_results[q]['adf_statistic'] for q in quantiles_plot]
+            critical_1p = [coint_results[q]['critical_values']['1%'] for q in quantiles_plot]
+            critical_5p = [coint_results[q]['critical_values']['5%'] for q in quantiles_plot]
+            
+            axes[0,0].plot(quantiles_plot, adf_stats, 'o-', linewidth=2, label='ADF Statistic', color='blue')
+            axes[0,0].plot(quantiles_plot, critical_1p, '--', linewidth=2, label='1% Critical', color='red')
+            axes[0,0].plot(quantiles_plot, critical_5p, '--', linewidth=2, label='5% Critical', color='orange')
+            
+            axes[0,0].set_xlabel('Quantiles')
+            axes[0,0].set_ylabel('ADF Statistics')
+            axes[0,0].set_title('ADF Statistics vs Critical Values across Quantiles')
+            axes[0,0].legend()
+            axes[0,0].grid(True, alpha=0.3)
+            
+            # Plot 2: P-values across quantiles
+            p_values = [coint_results[q]['p_value'] for q in quantiles_plot]
+            axes[0,1].plot(quantiles_plot, p_values, 's-', linewidth=2, color='green')
+            axes[0,1].axhline(y=significance_level, color='red', linestyle='--', 
+                            label=f'{significance_level} Significance Level')
+            axes[0,1].set_xlabel('Quantiles')
+            axes[0,1].set_ylabel('P-Values')
+            axes[0,1].set_title('P-Values across Quantiles')
+            axes[0,1].set_yscale('log')
+            axes[0,1].legend()
+            axes[0,1].grid(True, alpha=0.3)
+            
+            # Plot 3: Residuals from median quantile
+            if 0.5 in coint_results:
+                residuals = coint_results[0.5]['residuals']
+                axes[1,0].plot(residuals.index, residuals.values, linewidth=1.5, color='purple')
+                axes[1,0].axhline(y=0, color='black', linestyle='-', alpha=0.5)
+                axes[1,0].set_xlabel('Time/Index')
+                axes[1,0].set_ylabel('Residuals')
+                axes[1,0].set_title('Residuals from Median Quantile Cointegration')
+                axes[1,0].grid(True, alpha=0.3)
+            
+            # Plot 4: Cointegration persistence (coefficient variation)
+            coef_variation = []
+            for var in coef_names:
+                if var != 'Intercept':
+                    coefs = [coint_results[q]['coefficients'][var] for q in quantiles_plot if q in coint_results]
+                    if coefs:
+                        variation = np.std(coefs) / abs(np.mean(coefs)) if np.mean(coefs) != 0 else np.std(coefs)
+                        coef_variation.append((var, variation))
+            
+            if coef_variation:
+                variables, variations = zip(*coef_variation)
+                axes[1,1].bar(variables, variations, color='steelblue', alpha=0.7)
+                axes[1,1].set_xlabel('Variables')
+                axes[1,1].set_ylabel('Coefficient of Variation')
+                axes[1,1].set_title('Long-run Coefficient Persistence across Quantiles')
+                axes[1,1].tick_params(axis='x', rotation=45)
+                axes[1,1].grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            # ========================
+            # Residual Diagnostics
+            # ========================
+            st.subheader("Table 7: Residual Diagnostics")
+            
+            residual_data = []
+            for q in coint_quantiles:
+                if q in residual_tests:
+                    test = residual_tests[q]
+                    residual_data.append({
+                        'Quantile': f"{q:.2f}",
+                        'Ljung-Box Stat': f"{test['ljung_box_stat']:.3f}",
+                        'Ljung-Box P-value': f"{test['ljung_box_pval']:.3f}",
+                        'Residual Mean': f"{test['residual_mean']:.3f}",
+                        'Residual Std': f"{test['residual_std']:.3f}",
+                        'AutoCorrelation': 'Present' if test['ljung_box_pval'] < 0.05 else 'Absent'
+                    })
+            
+            if residual_data:
+                residual_df = pd.DataFrame(residual_data)
+                st.dataframe(residual_df, use_container_width=True)
+            
+            # ========================
             # Interpretation
-            st.subheader("Interpretation")
-            if combined_p1 < 0.05 and combined_p2 < 0.05:
-                st.success("**Bidirectional causality**: Both variables Granger-cause each other")
-            elif combined_p1 < 0.05:
-                st.success(f"**Unidirectional causality**: {var1} Granger-causes {var2}")
-            elif combined_p2 < 0.05:
-                st.success(f"**Unidirectional causality**: {var2} Granger-causes {var1}")
+            # ========================
+            st.subheader("Economic Interpretation")
+            
+            # Count cointegrated quantiles
+            cointegrated_count = sum(1 for q in coint_quantiles 
+                                   if q in coint_results and coint_results[q]['p_value'] < significance_level)
+            total_tested = len([q for q in coint_quantiles if q in coint_results])
+            
+            st.write(f"**Cointegration Summary:**")
+            st.write(f"- {cointegrated_count} out of {total_tested} quantiles show evidence of cointegration")
+            st.write(f"- Significance level: {significance_level}")
+            
+            if cointegrated_count > total_tested * 0.5:
+                st.success("**Strong evidence of quantile cointegration** - Long-run relationship exists across most quantiles")
+            elif cointegrated_count > 0:
+                st.info("**Partial quantile cointegration** - Long-run relationship exists at specific quantiles only")
             else:
-                st.info("**No Granger causality**: No causal relationship detected in either direction")
+                st.warning("**No evidence of quantile cointegration** - No stable long-run relationship detected")
+            
+            # Variable-specific interpretation
+            st.write("**Long-run Relationship Analysis:**")
+            for var in coef_names:
+                if var != 'Intercept':
+                    var_name = var
+                    coefs = [coint_results[q]['coefficients'][var] for q in coint_quantiles if q in coint_results]
+                    if coefs:
+                        min_coef = min(coefs)
+                        max_coef = max(coefs)
+                        mean_coef = np.mean(coefs)
+                        
+                        st.write(f"- **{var_name}**: Long-run coefficient ranges from {min_coef:.3f} to {max_coef:.3f}")
+                        if min_coef * max_coef > 0:  # Same sign
+                            direction = "positive" if mean_coef > 0 else "negative"
+                            st.write(f"  - Consistent {direction} relationship across quantiles")
+                        else:
+                            st.write(f"  - Relationship sign varies across quantiles")
+            
+            # ========================
+            # Download Section
+            # ========================
+            st.subheader("Download Quantile Cointegration Results")
+            
+            # Prepare comprehensive download data
+            download_coint_data = []
+            
+            for q in coint_quantiles:
+                if q in coint_results:
+                    result = coint_results[q]
+                    residual_test = residual_tests.get(q, {})
+                    
+                    # Cointegration test results
+                    download_coint_data.append({
+                        'Quantile': q,
+                        'Test_Type': 'Cointegration',
+                        'ADF_Statistic': result['adf_statistic'],
+                        'P_Value': result['p_value'],
+                        'Critical_1%': result['critical_values']['1%'],
+                        'Critical_5%': result['critical_values']['5%'],
+                        'Critical_10%': result['critical_values'].get('10%', np.nan),
+                        'Cointegrated': 'Yes' if result['p_value'] < significance_level else 'No',
+                        'Ljung_Box_Stat': residual_test.get('ljung_box_stat', np.nan),
+                        'Ljung_Box_Pval': residual_test.get('ljung_box_pval', np.nan),
+                        'Residual_Mean': residual_test.get('residual_mean', np.nan),
+                        'Residual_Std': residual_test.get('residual_std', np.nan)
+                    })
+                    
+                    # Coefficients for this quantile
+                    for var_name, coef_value in result['coefficients'].items():
+                        download_coint_data.append({
+                            'Quantile': q,
+                            'Test_Type': 'Coefficient',
+                            'Variable': var_name,
+                            'Coefficient_Value': coef_value,
+                            'ADF_Statistic': np.nan,
+                            'P_Value': np.nan
+                        })
+            
+            download_coint_df = pd.DataFrame(download_coint_data)
+            csv_coint = download_coint_df.to_csv(index=False)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    "📥 Download Cointegration Results",
+                    data=csv_coint,
+                    file_name="Quantile_Cointegration_Results.csv",
+                    mime="text/csv"
+                )
+            
+            with col2:
+                # Copy-paste friendly summary
+                st.info("**Copy-Paste Summary:**")
+                summary_text = f"Quantile Cointegration Test Results (Significance: {significance_level})\n"
+                summary_text += "Quantile | ADF Stat | P-value | Cointegrated\n"
+                summary_text += "--------|----------|---------|-------------\n"
                 
+                for q in coint_quantiles:
+                    if q in coint_results:
+                        result = coint_results[q]
+                        coint_status = "Yes" if result['p_value'] < significance_level else "No"
+                        summary_text += f"{q:.2f} | {result['adf_statistic']:.3f} | {result['p_value']:.3f} | {coint_status}\n"
+                
+                st.text_area("Summary for copying:", summary_text, height=200)
+            
+            # ========================
+            # Methodological Notes
+            # ========================
+            with st.expander("Methodological Notes on Quantile Cointegration"):
+                st.markdown("""
+                **Quantile Cointegration Approach:**
+                
+                1. **Method**: Based on Xiao (2009) quantile cointegration framework
+                2. **Procedure**:
+                   - Estimate quantile regression for long-run relationship at each quantile
+                   - Test residuals for stationarity using ADF test
+                   - Cointegration exists if residuals are stationary
+                
+                3. **Interpretation**:
+                   - Significant ADF statistic indicates cointegration at that quantile
+                   - Variation in coefficients shows quantile-specific long-run effects
+                   - Consistent cointegration across quantiles suggests robust relationship
+                
+                4. **Limitations**:
+                   - Assumes linear cointegration relationship within quantiles
+                   - Requires sufficient time series length
+                   - Panel data adaptation may require more sophisticated tests
+                
+                **Reference**: Xiao, Z. (2009). Quantile cointegrating regression. 
+                Journal of Econometrics, 150(2), 248-260.
+                """)
+        
         else:
-            st.error("Could not perform Granger causality tests on any country")
+            st.error("No quantile cointegration results could be computed. Check data requirements.")
 
 except Exception as e:
-    st.error(f"Error in Granger causality test: {str(e)}")
+    st.error(f"Error in quantile cointegration test: {str(e)}")
+    st.info("""
+    Common issues:
+    - Insufficient time series length
+    - Non-stationary variables (consider differencing)
+    - Missing values in the data
+    - Multicollinearity between variables
+    """)
 
 # ============================================
 # Footer
