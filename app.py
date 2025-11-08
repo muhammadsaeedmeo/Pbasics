@@ -308,10 +308,10 @@ if data is not None:
             scale_model = sm.OLS(abs_residuals, X).fit()
             scale_effects = scale_model.params
             
-            # Step 3: Quantile regression with enhanced features
+            # Step 3: Quantile regression with robust standard errors
             for q in quantiles:
                 formula = f"{y_var} ~ {' + '.join(x_vars)}"
-                q_model = quantreg(formula, data).fit(q=q, vcov='hc3')  # Robust standard errors
+                q_model = quantreg(formula, data).fit(q=q, vcov='robust')  # CORRECTED: 'robust' instead of 'hc3'
                 
                 # Store results
                 results[q] = {
@@ -371,23 +371,36 @@ if data is not None:
                 row = {'Variable': var}
                 for q in quantiles:
                     coef = mmqr_results[q]['coefficients'][var]
-                    row[f'Q{q}'] = coef
-                    
-                    # Add significance stars
                     pval = mmqr_results[q]['pvalues'][var]
+                    
+                    # Format with significance stars
                     if pval < 0.01:
-                        row[f'Q{q}'] = f"{coef:.3f}***"
+                        display_coef = f"{coef:.3f}***"
                     elif pval < 0.05:
-                        row[f'Q{q}'] = f"{coef:.3f}**"
+                        display_coef = f"{coef:.3f}**"
                     elif pval < 0.1:
-                        row[f'Q{q}'] = f"{coef:.3f}*"
+                        display_coef = f"{coef:.3f}*"
                     else:
-                        row[f'Q{q}'] = f"{coef:.3f}"
+                        display_coef = f"{coef:.3f}"
+                    
+                    row[f'Q{q}'] = display_coef
                 
                 results_data.append(row)
             
             results_df = pd.DataFrame(results_data)
             st.dataframe(results_df, use_container_width=True)
+            
+            # Additional table with raw coefficients for download
+            with st.expander("View Raw Coefficients (Numerical)"):
+                raw_data = []
+                for var in ['const'] + independent_vars:
+                    row = {'Variable': var}
+                    for q in quantiles:
+                        row[f'Q{q}'] = mmqr_results[q]['coefficients'][var]
+                    raw_data.append(row)
+                
+                raw_df = pd.DataFrame(raw_data)
+                st.dataframe(raw_df.style.format(precision=4), use_container_width=True)
             
             # ========================
             # Enhanced Coefficient Plot
@@ -447,17 +460,17 @@ if data is not None:
             # ========================
             st.subheader("Diagnostic Tests")
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             
             with col1:
                 # Quantile slope equality test (approximation)
                 st.write("**Quantile Slope Equality Test**")
-                median_coefs = mmqr_results[0.5]['coefficients']
-                q1_coefs = mmqr_results[0.25]['coefficients']
-                q3_coefs = mmqr_results[0.75]['coefficients']
+                median_coefs = [mmqr_results[0.5]['coefficients'][var] for var in independent_vars]
+                q1_coefs = [mmqr_results[0.25]['coefficients'][var] for var in independent_vars]
+                q3_coefs = [mmqr_results[0.75]['coefficients'][var] for var in independent_vars]
                 
-                diff_low = np.abs(median_coefs - q1_coefs).mean()
-                diff_high = np.abs(median_coefs - q3_coefs).mean()
+                diff_low = np.mean(np.abs(np.array(median_coefs) - np.array(q1_coefs)))
+                diff_high = np.mean(np.abs(np.array(median_coefs) - np.array(q3_coefs)))
                 
                 st.metric("Avg difference Q0.25 vs Q0.50", f"{diff_low:.4f}")
                 st.metric("Avg difference Q0.50 vs Q0.75", f"{diff_high:.4f}")
@@ -472,6 +485,20 @@ if data is not None:
                     st.warning(f"High residual variation: {scale_variation:.3f}")
                 else:
                     st.success(f"Residual variation: {scale_variation:.3f}")
+            
+            with col3:
+                # Overall model significance
+                st.write("**Model Significance**")
+                significant_vars = 0
+                total_vars = len(independent_vars)
+                
+                for var in independent_vars:
+                    pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles]
+                    if any(pval < 0.1 for pval in pvals):
+                        significant_vars += 1
+                
+                significance_ratio = significant_vars / total_vars
+                st.metric("Significant Variables", f"{significant_vars}/{total_vars}")
             
             # ========================
             # Economic Interpretation
@@ -492,12 +519,22 @@ if data is not None:
                 coef_range = max(coefs) - min(coefs)
                 trend = "increasing" if coefs[-1] > coefs[0] else "decreasing" if coefs[-1] < coefs[0] else "stable"
                 
+                # Economic magnitude
+                median_effect = mmqr_results[0.5]['coefficients'][var]
+                if abs(median_effect) > 0.5:
+                    magnitude = "strong"
+                elif abs(median_effect) > 0.2:
+                    magnitude = "moderate"
+                else:
+                    magnitude = "weak"
+                
                 interpretation_text += f"""
                 **{var}**: 
-                - Effect ranges from {min(coefs):.3f} to {max(coefs):.3f} across quantiles
-                - Shows {trend} marginal effects
-                - {'Significant at lower quantiles' if sig_low else 'Not significant at lower quantiles'}
-                - {'Significant at upper quantiles' if sig_high else 'Not significant at upper quantiles'}
+                - Shows **{trend}** marginal effects across quantiles
+                - **{magnitude}** median effect ({median_effect:.3f})
+                - Effect ranges from **{min(coefs):.3f}** to **{max(coefs):.3f}**
+                - {'✅ Significant at lower quantiles' if sig_low else '❌ Not significant at lower quantiles'}
+                - {'✅ Significant at upper quantiles' if sig_high else '❌ Not significant at upper quantiles'}
                 """
             
             st.markdown(interpretation_text)
@@ -517,7 +554,10 @@ if data is not None:
                         'Coefficient': mmqr_results[q]['coefficients'][var],
                         'P_Value': mmqr_results[q]['pvalues'][var],
                         'CI_Lower': mmqr_results[q]['conf_int'].loc[var, 0],
-                        'CI_Upper': mmqr_results[q]['conf_int'].loc[var, 1]
+                        'CI_Upper': mmqr_results[q]['conf_int'].loc[var, 1],
+                        'Significance': '***' if mmqr_results[q]['pvalues'][var] < 0.01 else 
+                                      '**' if mmqr_results[q]['pvalues'][var] < 0.05 else 
+                                      '*' if mmqr_results[q]['pvalues'][var] < 0.1 else ''
                     })
             
             download_df = pd.DataFrame(download_data)
@@ -538,24 +578,28 @@ if data is not None:
                 **Enhanced MMQR Approximation Features:**
                 
                 1. **Location-Scale Modeling**: Combines mean effects with scale effects
-                2. **Robust Inference**: HC3 standard errors and bootstrap confidence intervals
+                2. **Robust Inference**: Robust standard errors and bootstrap confidence intervals
                 3. **Joint Quantile Analysis**: Simultaneous examination across distribution
                 4. **Diagnostic Tests**: Quantile stability and heteroskedasticity checks
                 
-                **Limitations:**
-                - This is an approximation of true MMQR (Machado & Silva, 2019)
-                - True MMQR requires simultaneous estimation of all quantiles
-                - Consider specialized packages for exact MMQR implementation
-                
                 **Interpretation Guide:**
+                - *** p<0.01, ** p<0.05, * p<0.1
                 - Increasing coefficients → Stronger effects at upper quantiles
                 - Decreasing coefficients → Stronger effects at lower quantiles  
                 - Stable coefficients → Homogeneous effects across distribution
+                - Location effect: Mean relationship between X and Y
+                - Scale effect: How X affects the variability of Y
                 """)
                 
         except Exception as e:
             st.error(f"Estimation failed: {str(e)}")
-            st.info("Please check your data for multicollinearity or other issues.")
+            st.info("""
+            Common issues to check:
+            - Multicollinearity between independent variables
+            - Missing values in the data
+            - Too few observations for the number of variables
+            - Constant or near-constant variables
+            """)
     
     else:
         st.warning("Please select at least one independent variable.")
