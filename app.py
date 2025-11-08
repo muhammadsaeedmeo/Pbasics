@@ -156,7 +156,106 @@ for name, group in data.groupby("Country"):
     X = sm.add_constant(group[indep_vars])
     models.append(sm.OLS(y, X).fit())
 
-# use compare() or manually compute heterogeneity measures
+# ============================================
+# Slope Homogeneity Test (Pesaran and Yamagata, 2008)
+# ============================================
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+from scipy.stats import norm
+
+st.subheader("Slope Homogeneity Test (Pesaran and Yamagata, 2008)")
+
+# Step 1: Upload Data
+uploaded_file = st.file_uploader("Upload your panel dataset (CSV)", type=["csv"])
+
+if uploaded_file is not None:
+    data = pd.read_csv(uploaded_file)
+    st.success("✅ Dataset uploaded successfully.")
+    st.dataframe(data.head())
+
+    # Step 2: Variable Selection
+    st.subheader("Variable Selection")
+    dep_var = st.selectbox("Select Dependent Variable", options=data.columns)
+    indep_vars = st.multiselect(
+        "Select Independent Variables",
+        options=[c for c in data.columns if c != dep_var]
+    )
+
+    # Step 3: Check for panel identifiers
+    if "Country" not in data.columns or "Year" not in data.columns:
+        st.warning("Your dataset must contain 'Country' and 'Year' columns for panel structure.")
+    else:
+        if dep_var and indep_vars:
+            st.write(f"**Dependent Variable:** {dep_var}")
+            st.write(f"**Independent Variables:** {', '.join(indep_vars)}")
+
+            try:
+                # Prepare results storage
+                panel_results = []
+                varcov_matrices = []
+
+                # Group data by cross-section (e.g., country)
+                for country, group in data.groupby("Country"):
+                    group = group.dropna(subset=[dep_var] + indep_vars)
+                    if len(group) < len(indep_vars) + 1:
+                        continue
+                    y = group[dep_var]
+                    X = sm.add_constant(group[indep_vars])
+                    model = sm.OLS(y, X).fit()
+                    panel_results.append(model.params.values)
+                    varcov_matrices.append(model.cov_params().values)
+
+                # Convert to arrays
+                betas = np.vstack(panel_results)
+                mean_beta = np.mean(betas, axis=0)
+                N, k = betas.shape
+
+                # Compute the standardized delta test statistic
+                S = np.zeros((k, k))
+                for i in range(N):
+                    diff = (betas[i] - mean_beta).reshape(-1, 1)
+                    S += diff @ diff.T
+                S = S / N
+
+                # Variance adjustment using average covariance matrices
+                V_bar = np.mean(varcov_matrices, axis=0)
+                test_stat = N * np.trace(np.linalg.inv(V_bar) @ S)
+                delta_adj = (test_stat - k) / np.sqrt(2 * k)
+                p_val = 2 * (1 - norm.cdf(abs(delta_adj)))
+
+                # Step 4: Display Results
+                results_df = pd.DataFrame({
+                    "Statistic": ["Δ_adj"],
+                    "Value": [round(delta_adj, 3)],
+                    "p-value": [round(p_val, 3)]
+                })
+                st.write("### Slope Homogeneity Test Results")
+                st.dataframe(results_df, use_container_width=True)
+
+                # Step 5: Interpretation
+                if p_val < 0.05:
+                    st.success("Reject the null hypothesis — slopes are **heterogeneous** across cross-sections.")
+                    st.markdown("**Interpretation:** The regression slopes differ across units, indicating heterogeneity.")
+                else:
+                    st.info("Fail to reject the null hypothesis — slopes are **homogeneous** across cross-sections.")
+                    st.markdown("**Interpretation:** The regression slopes are broadly similar across cross-sections.")
+
+                # Reference
+                st.caption(
+                    "Reference: Pesaran, M. H., & Yamagata, T. (2008). "
+                    "Testing slope homogeneity in large panels. *Journal of Econometrics*, 142(1), 50–93."
+                )
+
+            except Exception as e:
+                st.warning(f"Error running slope homogeneity test: {e}")
+        else:
+            st.warning("Please select both dependent and independent variables to run the test.")
+else:
+    st.info("Please upload your dataset to begin.")
+
 
 # ============================================
 # Section E: Method of Moments Quantile Regression (MMQR)
