@@ -294,24 +294,28 @@ if data is not None:
             results = {}
             bootstrap_results = {q: [] for q in quantiles}
             
-            # Prepare data
-            X = sm.add_constant(data[x_vars])
+            # Prepare data - FIXED: Handle constant properly
+            X = data[x_vars]
             y = data[y_var]
             
             # Step 1: Location effect (mean regression)
-            ols_model = sm.OLS(y, X).fit()
+            X_with_const = sm.add_constant(X)  # Explicitly add constant
+            ols_model = sm.OLS(y, X_with_const).fit()
             location_effects = ols_model.params
             
             # Step 2: Scale effect (absolute residuals modeling)
             residuals = ols_model.resid
             abs_residuals = np.abs(residuals)
-            scale_model = sm.OLS(abs_residuals, X).fit()
+            scale_model = sm.OLS(abs_residuals, X_with_const).fit()
             scale_effects = scale_model.params
             
             # Step 3: Quantile regression with robust standard errors
             for q in quantiles:
                 formula = f"{y_var} ~ {' + '.join(x_vars)}"
-                q_model = quantreg(formula, data).fit(q=q, vcov='robust')  # CORRECTED: 'robust' instead of 'hc3'
+                q_model = quantreg(formula, data).fit(q=q, vcov='robust')
+                
+                # FIXED: Get correct variable names from the model
+                coef_names = q_model.params.index.tolist()
                 
                 # Store results
                 results[q] = {
@@ -320,7 +324,8 @@ if data is not None:
                     'conf_int': q_model.conf_int(),
                     'residuals': q_model.resid,
                     'location_effect': location_effects,
-                    'scale_effect': scale_effects
+                    'scale_effect': scale_effects,
+                    'coef_names': coef_names  # Store coefficient names
                 }
             
             # Bootstrap for joint inference
@@ -345,10 +350,10 @@ if data is not None:
                 # Calculate bootstrap confidence intervals
                 for q in quantiles:
                     if len(bootstrap_results[q]) > 0:
-                        boot_coefs = np.array(bootstrap_results[q])
+                        boot_coefs = pd.DataFrame(bootstrap_results[q])
                         results[q]['bootstrap_ci'] = {
-                            'lower': np.percentile(boot_coefs, 2.5, axis=0),
-                            'upper': np.percentile(boot_coefs, 97.5, axis=0)
+                            'lower': boot_coefs.quantile(0.025),
+                            'upper': boot_coefs.quantile(0.975)
                         }
             
             return results
@@ -361,13 +366,16 @@ if data is not None:
             )
             
             # ========================
-            # Results Table
+            # Results Table - FIXED: Use actual coefficient names
             # ========================
             st.subheader("Table: Enhanced MMQR Coefficients Across Quantiles")
             
+            # Get coefficient names from the first model (all should be same)
+            coef_names = mmqr_results[quantiles[0]]['coef_names']
+            
             # Create comprehensive results table
             results_data = []
-            for var in ['const'] + independent_vars:
+            for var in coef_names:  # FIXED: Use actual coefficient names
                 row = {'Variable': var}
                 for q in quantiles:
                     coef = mmqr_results[q]['coefficients'][var]
@@ -393,7 +401,7 @@ if data is not None:
             # Additional table with raw coefficients for download
             with st.expander("View Raw Coefficients (Numerical)"):
                 raw_data = []
-                for var in ['const'] + independent_vars:
+                for var in coef_names:  # FIXED: Use actual coefficient names
                     row = {'Variable': var}
                     for q in quantiles:
                         row[f'Q{q}'] = mmqr_results[q]['coefficients'][var]
@@ -403,14 +411,16 @@ if data is not None:
                 st.dataframe(raw_df.style.format(precision=4), use_container_width=True)
             
             # ========================
-            # Enhanced Coefficient Plot
+            # Enhanced Coefficient Plot - FIXED: Only plot independent variables (not intercept)
             # ========================
             st.subheader("Figure: MMQR Coefficient Dynamics with Confidence Intervals")
             
             fig, axes = plt.subplots(1, 2, figsize=(15, 6))
             
-            # Plot 1: Coefficient trajectories
-            for i, var in enumerate(independent_vars):
+            # Plot 1: Coefficient trajectories (only independent variables, not intercept)
+            plot_vars = [var for var in coef_names if var != 'Intercept']  # FIXED: Exclude intercept
+            
+            for i, var in enumerate(plot_vars):
                 coefs = [mmqr_results[q]['coefficients'][var] for q in quantiles]
                 
                 # Use bootstrap CI if available, else model CI
@@ -431,32 +441,38 @@ if data is not None:
             axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             axes[0].grid(True, alpha=0.3)
             
-            # Plot 2: Location-scale effects comparison
+            # Plot 2: Location-scale effects comparison (only independent variables)
             location_effects = mmqr_results[0.5]['location_effect']
             scale_effects = mmqr_results[0.5]['scale_effect']
             
-            variables = independent_vars
+            # FIXED: Only use independent variables (exclude constant)
+            variables = [var for var in independent_vars if var in location_effects.index]
             loc_vals = [location_effects[var] for var in variables]
             scale_vals = [scale_effects[var] for var in variables]
             
             x_pos = np.arange(len(variables))
             width = 0.35
             
-            axes[1].bar(x_pos - width/2, loc_vals, width, label='Location Effect', alpha=0.7)
-            axes[1].bar(x_pos + width/2, scale_vals, width, label='Scale Effect', alpha=0.7)
-            axes[1].set_xlabel("Variables")
-            axes[1].set_ylabel("Effect Size")
-            axes[1].set_title("Location vs Scale Effects (Median)")
-            axes[1].set_xticks(x_pos)
-            axes[1].set_xticklabels(variables, rotation=45)
-            axes[1].legend()
-            axes[1].grid(True, alpha=0.3)
+            if len(variables) > 0:  # Only plot if we have variables
+                axes[1].bar(x_pos - width/2, loc_vals, width, label='Location Effect', alpha=0.7)
+                axes[1].bar(x_pos + width/2, scale_vals, width, label='Scale Effect', alpha=0.7)
+                axes[1].set_xlabel("Variables")
+                axes[1].set_ylabel("Effect Size")
+                axes[1].set_title("Location vs Scale Effects (Median)")
+                axes[1].set_xticks(x_pos)
+                axes[1].set_xticklabels(variables, rotation=45)
+                axes[1].legend()
+                axes[1].grid(True, alpha=0.3)
+            else:
+                axes[1].text(0.5, 0.5, 'No variables to display', 
+                           ha='center', va='center', transform=axes[1].transAxes)
+                axes[1].set_title("Location vs Scale Effects")
             
             plt.tight_layout()
             st.pyplot(fig)
             
             # ========================
-            # Diagnostic Tests
+            # Diagnostic Tests - FIXED: Use correct variable names
             # ========================
             st.subheader("Diagnostic Tests")
             
@@ -465,9 +481,11 @@ if data is not None:
             with col1:
                 # Quantile slope equality test (approximation)
                 st.write("**Quantile Slope Equality Test**")
-                median_coefs = [mmqr_results[0.5]['coefficients'][var] for var in independent_vars]
-                q1_coefs = [mmqr_results[0.25]['coefficients'][var] for var in independent_vars]
-                q3_coefs = [mmqr_results[0.75]['coefficients'][var] for var in independent_vars]
+                # Use only independent variables (exclude intercept)
+                test_vars = [var for var in coef_names if var != 'Intercept']
+                median_coefs = [mmqr_results[0.5]['coefficients'][var] for var in test_vars]
+                q1_coefs = [mmqr_results[0.25]['coefficients'][var] for var in test_vars]
+                q3_coefs = [mmqr_results[0.75]['coefficients'][var] for var in test_vars]
                 
                 diff_low = np.mean(np.abs(np.array(median_coefs) - np.array(q1_coefs)))
                 diff_high = np.mean(np.abs(np.array(median_coefs) - np.array(q3_coefs)))
@@ -490,24 +508,27 @@ if data is not None:
                 # Overall model significance
                 st.write("**Model Significance**")
                 significant_vars = 0
-                total_vars = len(independent_vars)
+                test_vars = [var for var in coef_names if var != 'Intercept']  # Exclude intercept
+                total_vars = len(test_vars)
                 
-                for var in independent_vars:
+                for var in test_vars:
                     pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles]
                     if any(pval < 0.1 for pval in pvals):
                         significant_vars += 1
                 
-                significance_ratio = significant_vars / total_vars
+                significance_ratio = significant_vars / total_vars if total_vars > 0 else 0
                 st.metric("Significant Variables", f"{significant_vars}/{total_vars}")
             
             # ========================
-            # Economic Interpretation
+            # Economic Interpretation - FIXED: Use only independent variables
             # ========================
             st.subheader("Economic Interpretation")
             
             interpretation_text = ""
+            # Only interpret independent variables, not the intercept
+            interpret_vars = [var for var in coef_names if var != 'Intercept']
             
-            for var in independent_vars:
+            for var in interpret_vars:
                 coefs = [mmqr_results[q]['coefficients'][var] for q in quantiles]
                 pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles]
                 
@@ -540,13 +561,13 @@ if data is not None:
             st.markdown(interpretation_text)
             
             # ========================
-            # Download Results
+            # Download Results - FIXED: Use correct variable names
             # ========================
             st.subheader("Download Results")
             
             # Prepare comprehensive results for download
             download_data = []
-            for var in ['const'] + independent_vars:
+            for var in coef_names:  # FIXED: Use actual coefficient names
                 for q in quantiles:
                     download_data.append({
                         'Variable': var,
@@ -599,6 +620,7 @@ if data is not None:
             - Missing values in the data
             - Too few observations for the number of variables
             - Constant or near-constant variables
+            - Check that your variables have sufficient variation
             """)
     
     else:
