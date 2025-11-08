@@ -219,11 +219,14 @@ except Exception as e:
     st.warning(f"Error running slope homogeneity test: {e}")
 
 # ============================================
-# Section E: Method of Moments Quantile Regression (MMQR)
+# Section E: Method of Moments Quantile Regression (MMQR - Approximation)
 # ============================================
-st.header("E. Method of Moments Quantile Regression (MMQR) Results")
 
-# Upload or use existing dataset
+st.header("E. Method of Moments Quantile Regression (Approximation via Quantile Regression)")
+
+from statsmodels.formula.api import quantreg
+import seaborn as sns
+
 uploaded_file = st.file_uploader("Upload your dataset (CSV)", type=["csv"])
 if uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
@@ -232,76 +235,103 @@ else:
     data = st.session_state.get("uploaded_data", None)
 
 if data is not None:
-    st.write("Dataset loaded successfully.")
+    st.success("✅ Dataset loaded successfully.")
     st.dataframe(data.head())
 
-    # Variable selection
     dependent_var = st.selectbox("Select Dependent Variable", options=data.columns)
-    independent_vars = st.multiselect("Select Independent Variables", options=[c for c in data.columns if c != dependent_var])
+    independent_vars = st.multiselect(
+        "Select Independent Variables",
+        options=[c for c in data.columns if c != dependent_var]
+    )
 
-    if len(independent_vars) > 0:
-        # Quantiles for MMQR
+    if independent_vars:
         quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
+        results = []
 
-        # Simulated coefficients (replace with actual regression estimates later)
-        mmqr_results = pd.DataFrame({
-            "Variables": independent_vars,
-            "Constant": np.round(np.random.uniform(-1, 1, len(independent_vars)), 3),
-            "Location": np.round(np.random.uniform(0.1, 0.5, len(independent_vars)), 3),
-            "Scale": np.round(np.random.uniform(0.01, 0.1, len(independent_vars)), 3),
-            "Q0.05": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.25": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.50": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.75": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.95": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3)
-        })
+        for q in quantiles:
+            formula = f"{dependent_var} ~ {' + '.join(independent_vars)}"
+            mod = quantreg(formula, data).fit(q=q)
+            coef = mod.params.round(3)
+            results.append(coef)
 
-        # Display Table
-        st.subheader("Table: MMQR Coefficients by Quantile")
-        st.dataframe(mmqr_results)
+        # Combine results into one table
+        mmqr_df = pd.DataFrame(results, index=[f"Q{q}" for q in quantiles]).T
+        mmqr_df.insert(0, "Variable", mmqr_df.index)
+        mmqr_df.reset_index(drop=True, inplace=True)
 
-        # Download option
-        csv = mmqr_results.to_csv(index=False).encode('utf-8')
-        st.download_button("Download MMQR Results", csv, "MMQR_results.csv", "text/csv")
+        st.subheader("Table: Quantile Regression Coefficients")
+        st.dataframe(mmqr_df.style.format(precision=3), use_container_width=True)
 
-        # Plotting coefficients
-        st.subheader("Figure: Quantile Coefficient Plot")
-        fig, ax = plt.subplots()
-        for var in independent_vars:
-            ax.plot(quantiles, mmqr_results.loc[mmqr_results["Variables"] == var, ["Q0.05", "Q0.25", "Q0.50", "Q0.75", "Q0.95"]].values.flatten(),
-                    marker='o', label=var)
-        ax.set_xlabel("Quantiles")
-        ax.set_ylabel("Estimated Coefficients")
-        ax.legend()
+        # Downloadable CSV
+        csv = mmqr_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Download Quantile Regression Results",
+            data=csv,
+            file_name="Quantile_Regression_Results.csv",
+            mime="text/csv"
+        )
+
+        # ========================
+        # Academic-style Plot
+        # ========================
+        st.subheader("Figure: Quantile Coefficient Plot with Confidence Bands")
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        palette = sns.color_palette("husl", len(independent_vars))
+
+        for i, var in enumerate(independent_vars):
+            coefs, lower, upper = [], [], []
+            for q in quantiles:
+                formula = f"{dependent_var} ~ {' + '.join(independent_vars)}"
+                mod = quantreg(formula, data).fit(q=q)
+                coefs.append(mod.params[var])
+                ci = mod.conf_int().loc[var]
+                lower.append(ci[0])
+                upper.append(ci[1])
+            ax.plot(quantiles, coefs, marker='o', color=palette[i], label=var)
+            ax.fill_between(quantiles, lower, upper, alpha=0.2, color=palette[i])
+
+        ax.axhline(0, color="gray", linestyle="--", linewidth=1)
+        ax.set_xlabel("Quantiles (τ)", fontsize=11)
+        ax.set_ylabel("Estimated Coefficients", fontsize=11)
+        ax.set_title(f"Quantile Coefficient Variation for {dependent_var}", fontsize=13, fontweight='bold')
+        ax.legend(title="Independent Variables", bbox_to_anchor=(1.05, 1), loc="upper left")
+        sns.despine()
         st.pyplot(fig)
 
-        # Generate readable summary of variable impacts
-        st.subheader("Summary of MMQR Findings")
+        # ========================
+        # Interpretation
+        # ========================
+        st.subheader("Summary of Findings")
 
         summary_text = ""
-        for _, row in mmqr_results.iterrows():
-            var = row["Variables"]
-            median_coef = row["Q0.50"]
-            if median_coef > 0:
+        for var in independent_vars:
+            median_effect = mmqr_df.loc[mmqr_df["Variable"] == var, "Q0.5"].values[0]
+            if median_effect > 0:
                 direction = "positive"
-            elif median_coef < 0:
+            elif median_effect < 0:
                 direction = "negative"
             else:
                 direction = "neutral"
-            strength = "strong" if abs(median_coef) > 0.25 else "moderate" if abs(median_coef) > 0.1 else "weak"
-            summary_text += f"- **{var}** shows a {strength} {direction} impact on **{dependent_var}** across quantiles, with stronger effects at higher quantiles.\n"
+            strength = "strong" if abs(median_effect) > 0.25 else "moderate" if abs(median_effect) > 0.1 else "weak"
+            summary_text += f"- **{var}** has a {strength} {direction} association with **{dependent_var}**, with variation observed across quantiles.\n"
 
         st.markdown(summary_text)
 
         st.markdown("""
-        The MMQR results reveal heterogeneous effects of independent variables across quantiles of the dependent variable.
-        The **Location** and **Scale** parameters indicate, respectively, the central tendency and variability of the response,
-        while the **Constant** term captures the intercept of the quantile function.
-        Coefficient variations across quantiles suggest that the relationships are not uniform, highlighting distributional asymmetries in the data.
+        **Interpretation Note:**  
+        The coefficients across quantiles (Q0.05–Q0.95) capture how the marginal effect of independent variables
+        varies across the conditional distribution of the dependent variable.  
+        Positive coefficients at higher quantiles suggest that the variable’s effect strengthens for larger
+        values of the dependent variable.  
+        This is a *pooled quantile regression* approximation of the Method of Moments Quantile Regression (MMQR) 
+        by Machado and Silva (2019), used here due to software limitations.
         """)
-
+    else:
+        st.warning("Please select at least one independent variable.")
 else:
     st.warning("Please upload your dataset to proceed.")
+
 
 # ============================================
 # Section F: Granger Causality (Placeholder)
