@@ -1,7 +1,6 @@
 # ============================================
 # Streamlit Panel Data Analysis App using MMQR
 # ============================================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -71,58 +70,66 @@ st.header("B. Variable Visualization & Normality Testing")
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 if numeric_cols:
     selected_var = st.selectbox("Select variable for analysis", options=numeric_cols)
+    group_col = st.selectbox("Select grouping variable (optional):", options=[None] + df.columns.tolist())
     color_option = st.selectbox(
         "Color Palette", 
         options=["viridis","coolwarm","magma","plasma","cividis","Blues","Greens","Reds"], 
         index=0
     )
 
-    fig = plt.figure(constrained_layout=True, figsize=(12, 10))
-    gs = fig.add_gridspec(2, 4, height_ratios=[2, 3])
+    # ------------------------------------------------------------
+    # Layout: 2x2 grid (Bar, Box, Violin, Strip)
+    # ------------------------------------------------------------
+    fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+    fig.subplots_adjust(hspace=0.4, wspace=0.3)
+    cmap = sns.color_palette(color_option, as_cmap=True)
 
-    # main distribution
-    ax_main = fig.add_subplot(gs[0, :])
-    sns.histplot(df[selected_var], kde=True,
-                 color=sns.color_palette(color_option, as_cmap=True)(0.5),
-                 ax=ax_main)
-    ax_main.set_title(f"Distribution of {selected_var}", fontsize=14, fontweight="bold")
-    ax_main.set_xlabel(selected_var)
-    ax_main.set_ylabel("Frequency")
+    # Bar Plot
+    sns.histplot(df[selected_var], kde=False, color=cmap(0.5), ax=axs[0, 0])
+    axs[0, 0].set_title("Bar Plot", fontsize=12, fontweight="bold")
+    axs[0, 0].set_xlabel(selected_var)
+    axs[0, 0].set_ylabel("Frequency")
 
-    # four small plots
-    ax_box = fig.add_subplot(gs[1, 0])
-    sns.boxplot(y=df[selected_var],
-                color=sns.color_palette(color_option, as_cmap=True)(0.4),
-                ax=ax_box)
-    ax_box.set_title("Boxplot")
+    # Box Plot
+    sns.boxplot(y=df[selected_var], x=group_col if group_col else None, 
+                color=cmap(0.4), ax=axs[0, 1])
+    axs[0, 1].set_title("Box Plot", fontsize=12, fontweight="bold")
 
-    ax_violin = fig.add_subplot(gs[1, 1])
-    sns.violinplot(y=df[selected_var],
-                   color=sns.color_palette(color_option, as_cmap=True)(0.6),
-                   ax=ax_violin)
-    ax_violin.set_title("Violin Plot")
+    # Violin Plot
+    sns.violinplot(y=df[selected_var], x=group_col if group_col else None, 
+                   color=cmap(0.6), ax=axs[1, 0])
+    axs[1, 0].set_title("Violin Plot", fontsize=12, fontweight="bold")
 
-    ax_density = fig.add_subplot(gs[1, 2])
-    sns.kdeplot(df[selected_var], fill=True,
-                color=sns.color_palette(color_option, as_cmap=True)(0.5),
-                ax=ax_density)
-    ax_density.set_title("Density Plot")
-
-    ax_qq = fig.add_subplot(gs[1, 3])
-    sm.qqplot(df[selected_var], line="45", ax=ax_qq,
-              color=sns.color_palette(color_option, as_cmap=True)(0.5))
-    ax_qq.set_title("Q-Q Plot")
+    # Strip Plot
+    sns.stripplot(y=df[selected_var], x=group_col if group_col else None, 
+                  color=cmap(0.7), size=4, jitter=True, ax=axs[1, 1])
+    axs[1, 1].set_title("Strip Plot", fontsize=12, fontweight="bold")
 
     plt.tight_layout()
     st.pyplot(fig)
 
-    # Normality test
+    # ------------------------------------------------------------
+    # Normality Test (Shapiro–Wilk)
+    # ------------------------------------------------------------
+    st.subheader("Normality Test (Shapiro–Wilk)")
     stat, p = shapiro(df[selected_var])
-    st.write(f"**Shapiro–Wilk Test**: W = {stat:.3f}, p = {p:.3f}")
-    st.info("Variable is likely normal (p > 0.05)" if p > 0.05 else "Variable departs from normality (p < 0.05)")
+    st.write(f"**Statistic (W)**: {stat:.4f}")
+    st.write(f"**p-value:** {p:.4f}")
+
+    if p > 0.05:
+        st.info("Fail to reject H₀ → variable appears normally distributed.")
+    else:
+        st.warning("Reject H₀ → variable departs from normality.")
+
+    # ------------------------------------------------------------
+    # Descriptive Statistics
+    # ------------------------------------------------------------
+    st.subheader("Descriptive Statistics")
+    st.dataframe(df[selected_var].describe().to_frame().T)
 
 else:
-    st.warning("No numeric columns found.")
+    st.warning("No numeric columns found in dataset.")
+
 
 # ============================================
 # Section C: Correlation Analysis
