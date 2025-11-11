@@ -70,87 +70,103 @@ if 'Country' not in df.columns or 'Year' not in df.columns:
 
 
 
-# ============================================
-# Section B: Variable Distribution Visualization
-# ============================================
+import streamlit as st
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+from scipy.stats import shapiro
 
-st.header("B. Variable Distribution Visualization")
+st.set_option('deprecation.showPyplotGlobalUse', False)
 
-# Detect numeric columns
-numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+# ============================================================
+# SECTION: Upload Data
+# ============================================================
+st.title("Panel Data Visualization & Normality Testing")
 
-if not numeric_cols:
-    st.warning("No numeric variables found in your dataset for visualization.")
-else:
+uploaded_file = st.file_uploader("Upload your panel dataset (CSV)", type=["csv"])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    st.success("Data loaded successfully.")
+
     # Variable selection
-    selected_var = st.selectbox("Select Variable for Distribution Analysis", options=numeric_cols)
+    selected_var = st.selectbox("Select variable for visualization:", df.columns)
+    color_option = st.selectbox("Choose color palette:", ["viridis", "plasma", "magma", "cividis"])
 
-    # Color selection
-    color_option = st.selectbox(
-        "Select Visualization Color Palette",
-        options=["coolwarm", "viridis", "plasma", "magma", "cividis", "Blues", "Greens", "Reds"],
-        index=0
-    )
-
-    # Prepare figure layout
+    # ============================================================
+    # SECTION: Visualizations
+    # ============================================================
     fig = plt.figure(constrained_layout=True, figsize=(12, 10))
-    subfigs = fig.subfigures(2, 1, height_ratios=[2, 3])
+    gs = fig.add_gridspec(2, 4, height_ratios=[2, 3])
 
-    # Upper main distribution (Histogram + KDE)
-    ax_main = subfigs[0].subplots()
-    sns.histplot(df[selected_var], kde=True, color=sns.color_palette(color_option, as_cmap=True)(0.5), ax=ax_main)
+    # Top main plot (spans all 4 columns)
+    ax_main = fig.add_subplot(gs[0, :])
+    sns.histplot(df[selected_var], kde=True,
+                 color=sns.color_palette(color_option, as_cmap=True)(0.5),
+                 ax=ax_main)
     ax_main.set_title(f"Distribution Overview of {selected_var}", fontsize=14, fontweight='bold')
     ax_main.set_xlabel(selected_var)
     ax_main.set_ylabel("Frequency")
 
-    # Lower four subplots (Box, Violin, Density, QQ)
-    axs = subfigs[1].subplots(1, 4, figsize=(14, 4))
+    # Lower subplots
+    ax_box = fig.add_subplot(gs[1, 0])
+    ax_violin = fig.add_subplot(gs[1, 1])
+    ax_density = fig.add_subplot(gs[1, 2])
+    ax_qq = fig.add_subplot(gs[1, 3])
 
     # Boxplot
-    sns.boxplot(y=df[selected_var], color=sns.color_palette(color_option, as_cmap=True)(0.4), ax=axs[0])
-    axs[0].set_title("Boxplot")
+    sns.boxplot(y=df[selected_var],
+                color=sns.color_palette(color_option, as_cmap=True)(0.4),
+                ax=ax_box)
+    ax_box.set_title("Boxplot")
 
     # Violin plot
-    sns.violinplot(y=df[selected_var], color=sns.color_palette(color_option, as_cmap=True)(0.6), ax=axs[1])
-    axs[1].set_title("Violin Plot")
+    sns.violinplot(y=df[selected_var],
+                   color=sns.color_palette(color_option, as_cmap=True)(0.6),
+                   ax=ax_violin)
+    ax_violin.set_title("Violin Plot")
 
     # Density plot
-    sns.kdeplot(df[selected_var], fill=True, color=sns.color_palette(color_option, as_cmap=True)(0.5), ax=axs[2])
-    axs[2].set_title("Density Plot")
+    sns.kdeplot(df[selected_var],
+                fill=True,
+                color=sns.color_palette(color_option, as_cmap=True)(0.5),
+                ax=ax_density)
+    ax_density.set_title("Density Plot")
 
-    # QQ plot
-    sm.qqplot(df[selected_var], line='45', ax=axs[3], color=sns.color_palette(color_option, as_cmap=True)(0.5))
-    axs[3].set_title("Q-Q Plot")
+    # Q-Q plot
+    sm.qqplot(df[selected_var].dropna(), line='45', ax=ax_qq,
+              color=sns.color_palette(color_option, as_cmap=True)(0.5))
+    ax_qq.set_title("Q-Q Plot")
 
     plt.tight_layout()
     st.pyplot(fig)
 
-    # ============================================
-    # Normality / Stationarity Interpretation
-    # ============================================
+    # ============================================================
+    # SECTION: Normality Testing
+    # ============================================================
+    st.subheader("Normality Test (Shapiro–Wilk)")
 
-    st.subheader("Distribution Interpretation")
+    try:
+        stat, p_value = shapiro(df[selected_var].dropna())
+        st.write(f"**Test Statistic:** {stat:.4f}")
+        st.write(f"**p-value:** {p_value:.4f}")
 
-    # Normality test (Shapiro-Wilk)
-    shapiro_stat, shapiro_p = stats.shapiro(df[selected_var].dropna())
+        if p_value > 0.05:
+            st.info("Fail to reject the null hypothesis — data appears normally distributed.")
+        else:
+            st.warning("Reject the null hypothesis — data does not appear normally distributed.")
+    except Exception as e:
+        st.error(f"Normality test could not be computed: {e}")
 
-    if shapiro_p > 0.05:
-        st.success(f"✅ {selected_var} appears approximately normally distributed (p = {shapiro_p:.3f}).")
-        st.write(
-            f"This suggests the variable may be **stationary or stable** around its mean, "
-            f"and deviations are consistent with a normal process."
-        )
-    else:
-        st.warning(f"⚠️ {selected_var} deviates from normality (p = {shapiro_p:.3f}).")
-        st.write(
-            f"This indicates **non-normal distribution** or possible **non-stationarity**; "
-            f"consider transformation or differencing before panel estimation."
-        )
-
-    # Show descriptive statistics
+    # ============================================================
+    # SECTION: Summary Statistics
+    # ============================================================
     st.subheader("Descriptive Statistics")
-    desc = df[selected_var].describe().to_frame().T
-    st.dataframe(desc)
+    st.write(df[selected_var].describe())
+
+else:
+    st.warning("Please upload a CSV file to proceed.")
+
 # ============================================
 # Section B: Correlation Analysis
 # ============================================
