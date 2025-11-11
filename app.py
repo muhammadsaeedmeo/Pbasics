@@ -62,14 +62,16 @@ if "Country" not in df.columns or "Year" not in df.columns:
     st.stop()
 
 # ======================================================================
-# 📊 SECTION: DESCRIPTIVE STATISTICS AND DISTRIBUTION PLOTS
+# 📊 SECTION: DESCRIPTIVE STATISTICS AND DISTRIBUTION ANALYSIS (Enhanced)
 # ======================================================================
 
 st.subheader("Descriptive Statistics and Distribution Analysis")
 
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-selected_col = st.selectbox("Select a variable for analysis (or choose 'All Variables')",
-                            options=["All Variables"] + numeric_cols)
+selected_col = st.selectbox(
+    "Select a variable (or choose 'All Variables - Combined Summary Plot')",
+    options=["All Variables - Combined Summary Plot"] + numeric_cols
+)
 
 from scipy import stats
 import seaborn as sns
@@ -79,36 +81,60 @@ def plot_distribution(col):
     data = df[col].dropna()
     fig, axes = plt.subplots(1, 4, figsize=(14, 3))
     
-    sns.histplot(data, kde=True, ax=axes[0], color="skyblue")
+    sns.histplot(data, kde=True, ax=axes[0], color="steelblue")
     axes[0].set_title("Histogram + KDE")
     
     stats.probplot(data, dist="norm", plot=axes[1])
     axes[1].set_title("QQ Plot")
     
-    sns.boxplot(y=data, ax=axes[2], color="lightgreen")
+    sns.boxplot(y=data, ax=axes[2], color="mediumseagreen")
     axes[2].set_title("Box Plot")
     
-    sns.violinplot(y=data, ax=axes[3], color="lightcoral")
+    sns.violinplot(y=data, ax=axes[3], color="salmon")
     axes[3].set_title("Violin Plot")
     
     plt.tight_layout()
     st.pyplot(fig)
 
-    # Shapiro–Wilk test for normality
     if len(data) > 3:
         stat, p = stats.shapiro(data)
         if p > 0.05:
-            st.info(f"**{col}** appears *normally distributed* (p = {p:.3f}).")
+            st.info(f"**{col}** appears normally distributed (p = {p:.3f}).")
         else:
             st.warning(f"**{col}** deviates from normality (p = {p:.3f}).")
     else:
         st.write("Sample too small for normality test.")
     st.markdown("---")
 
-if selected_col == "All Variables":
-    for col in numeric_cols:
-        st.subheader(f"Descriptive Analysis for {col}")
-        plot_distribution(col)
+
+# ---- Combined Plot for All Variables ----
+def combined_distribution_plot(df, numeric_cols):
+    n = len(numeric_cols)
+    cols = 3
+    rows = int(np.ceil(n / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 4 * rows))
+    axes = axes.flatten()
+    
+    for i, col in enumerate(numeric_cols):
+        data = df[col].dropna()
+        sns.kdeplot(data, fill=True, ax=axes[i], color=sns.color_palette("husl", n)[i])
+        axes[i].set_title(col, fontsize=11)
+        axes[i].set_xlabel("")
+        axes[i].set_ylabel("Density")
+    
+    # Remove empty subplots
+    for j in range(i + 1, len(axes)):
+        fig.delaxes(axes[j])
+    
+    plt.suptitle("Combined Distribution of All Variables", fontsize=14, fontweight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    st.pyplot(fig)
+    st.markdown("**Note:** The density plots show each variable’s overall distribution pattern for quick comparison.")
+
+
+# ---- Logic ----
+if selected_col == "All Variables - Combined Summary Plot":
+    combined_distribution_plot(df, numeric_cols)
 else:
     st.subheader(f"Descriptive Analysis for {selected_col}")
     plot_distribution(selected_col)
