@@ -62,7 +62,7 @@ if "Country" not in df.columns or "Year" not in df.columns:
     st.stop()
 
 # ============================================
-# Section B: Visualization & Normality Testing
+# Section B: Visualization & Normality Testing (Enhanced)
 # ============================================
 
 st.header("B. Variable Visualization & Normality Testing")
@@ -73,46 +73,65 @@ if numeric_cols:
     group_col = st.selectbox("Select grouping variable (optional):", options=["None"] + df.columns.tolist())
     color_option = st.selectbox(
         "Color Palette", 
-        options=["viridis","coolwarm","magma","plasma","cividis","Blues","Greens","Reds"], 
+        options=["viridis","coolwarm","magma","plasma","cividis","crest","rocket","flare"], 
         index=0
     )
+
+    cmap = sns.color_palette(color_option, as_cmap=True)
+    g = None if group_col == "None" else group_col
 
     # ------------------------------------------------------------
     # Layout: 2x2 grid (Bar, Box, Violin, Strip)
     # ------------------------------------------------------------
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-    fig.subplots_adjust(hspace=0.4, wspace=0.3)
-    cmap = sns.color_palette(color_option, as_cmap=True)
+    fig.subplots_adjust(hspace=0.4, wspace=0.4)
 
-    # Bar Plot
-    sns.histplot(df[selected_var], kde=False, color=cmap(0.5), ax=axs[0, 0])
-    axs[0, 0].set_title("Bar Plot", fontsize=12, fontweight="bold")
+    # --------------------
+    # 1. BAR + KDE overlay
+    # --------------------
+    sns.histplot(df[selected_var], bins=25, kde=True,
+                 color=cmap(0.5), edgecolor="white", ax=axs[0, 0])
+    axs[0, 0].set_title("Bar Plot with KDE Overlay", fontsize=12, fontweight="bold")
     axs[0, 0].set_xlabel(selected_var)
     axs[0, 0].set_ylabel("Frequency")
+    axs[0, 0].grid(alpha=0.3)
 
-    # Helper to handle grouping correctly
-    g = None if group_col == "None" else group_col
-
-    # Box Plot
+    # --------------------
+    # 2. BOX PLOT + swarm overlay (sample points)
+    # --------------------
     if g:
-        sns.boxplot(y=df[selected_var], x=df[g], color=cmap(0.4), ax=axs[0, 1])
+        sns.boxplot(x=df[g], y=df[selected_var], color=cmap(0.4), ax=axs[0, 1])
+        sns.swarmplot(x=df[g], y=df[selected_var], color="black", size=3, alpha=0.6, ax=axs[0, 1])
     else:
         sns.boxplot(y=df[selected_var], color=cmap(0.4), ax=axs[0, 1])
-    axs[0, 1].set_title("Box Plot", fontsize=12, fontweight="bold")
+        sns.swarmplot(y=df[selected_var], color="black", size=3, alpha=0.6, ax=axs[0, 1])
+    axs[0, 1].set_title("Box Plot with Sample Points", fontsize=12, fontweight="bold")
+    axs[0, 1].grid(alpha=0.3)
 
-    # Violin Plot
+    # --------------------
+    # 3. VIOLIN + embedded density trace
+    # --------------------
     if g:
-        sns.violinplot(y=df[selected_var], x=df[g], color=cmap(0.6), ax=axs[1, 0])
+        sns.violinplot(x=df[g], y=df[selected_var], inner=None, color=cmap(0.6), ax=axs[1, 0])
+        sns.pointplot(x=df[g], y=df[selected_var], color="black", errorbar=None, ax=axs[1, 0])
     else:
-        sns.violinplot(y=df[selected_var], color=cmap(0.6), ax=axs[1, 0])
-    axs[1, 0].set_title("Violin Plot", fontsize=12, fontweight="bold")
+        sns.violinplot(y=df[selected_var], inner=None, color=cmap(0.6), ax=axs[1, 0])
+        sns.kdeplot(y=df[selected_var], color="black", ax=axs[1, 0])
+    axs[1, 0].set_title("Violin Plot with Density Shape", fontsize=12, fontweight="bold")
+    axs[1, 0].grid(alpha=0.3)
 
-    # Strip Plot
+    # --------------------
+    # 4. STRIP + mean line (sample indicator)
+    # --------------------
     if g:
-        sns.stripplot(y=df[selected_var], x=df[g], color=cmap(0.7), size=4, jitter=True, ax=axs[1, 1])
+        sns.stripplot(x=df[g], y=df[selected_var], jitter=0.25, size=4, color=cmap(0.7), alpha=0.6, ax=axs[1, 1])
+        mean_vals = df.groupby(g)[selected_var].mean()
+        axs[1, 1].plot(range(len(mean_vals)), mean_vals, color="black", marker="o", linewidth=2)
     else:
-        sns.stripplot(y=df[selected_var], color=cmap(0.7), size=4, jitter=True, ax=axs[1, 1])
-    axs[1, 1].set_title("Strip Plot", fontsize=12, fontweight="bold")
+        sns.stripplot(y=df[selected_var], jitter=0.25, size=4, color=cmap(0.7), alpha=0.6, ax=axs[1, 1])
+        axs[1, 1].axhline(df[selected_var].mean(), color="black", linestyle="--", linewidth=2)
+    axs[1, 1].set_title("Strip Plot with Sample Mean", fontsize=12, fontweight="bold")
+    axs[1, 1].grid(alpha=0.3)
 
     plt.tight_layout()
     st.pyplot(fig)
@@ -124,7 +143,6 @@ if numeric_cols:
     stat, p = shapiro(df[selected_var])
     st.write(f"**Statistic (W)**: {stat:.4f}")
     st.write(f"**p-value:** {p:.4f}")
-
     if p > 0.05:
         st.info("Fail to reject H₀ → variable appears normally distributed.")
     else:
