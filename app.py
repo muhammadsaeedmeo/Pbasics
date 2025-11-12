@@ -251,18 +251,27 @@ for q in quantiles:
     p_vals = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
     mmqr_p[q] = p_vals
 
-# --- Step 6: Merge all into compact stacked-cell format ---
+# --- Step 6: Compact cell formatting (Coef, Std.Err, P-Value) ---
 formatted = {}
 for q in quantiles:
-    formatted[q] = mmqr_results[q].round(3).astype(str) + " (" + \
-                   mmqr_se[q].round(3).astype(str) + ") [" + \
-                   mmqr_p[q].round(3).astype(str) + "]"
+    formatted[q] = (
+        mmqr_results[q].round(3).astype(str)
+        + " (" + mmqr_se[q].round(3).astype(str)
+        + ") [" + mmqr_p[q].round(3).astype(str)
+        + "]"
+    )
 
 mmqr_df = pd.DataFrame(formatted)
+mmqr_df.index.name = "Variable"
 
 st.subheader("MMQR Results: Coefficient (Std. Error) [P-Value] Across Quantiles")
 st.markdown("Each cell shows: Coefficient (Std. Error) [P-Value]")
-st.dataframe(mmqr_df)
+
+# Make table readable in Streamlit
+st.dataframe(mmqr_df.style.set_properties(**{
+    'text-align': 'center',
+    'font-family': 'Times New Roman'
+}))
 
 # --- Step 7: Plot Coefficient Dynamics ---
 st.subheader("Coefficient Dynamics by Quantile")
@@ -277,7 +286,7 @@ ax.set_title("MMQR Coefficient Dynamics Across Quantiles")
 ax.legend()
 st.pyplot(fig)
 
-# --- Step 8: Download Results ---
+# --- Step 8: Download formatted results ---
 out_text = []
 out_text.append("=== LOCATION PARAMETERS ===\n")
 out_text.append(loc_table.to_string())
@@ -292,6 +301,7 @@ st.download_button(
     file_name="MMQR_Compact_Results.rtf",
     mime="application/rtf"
 )
+
 
 # ============================================
 # Footer
