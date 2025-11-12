@@ -186,105 +186,75 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-# ============================================
-# Section 4: Method of Moments Quantile Regression (MMQR)
-# ============================================
+# ==============================================================
+# 🟩 SECTION: METHOD OF MOMENTS QUANTILE REGRESSION (MMQR)
+# ==============================================================
+import pandas as pd
+import statsmodels.formula.api as smf
 
-st.header("Section 4: Method of Moments Quantile Regression (MMQR) with Location–Scale Decomposition")
+# --- Define your model variables ---
+dependent_var = 'Y'  # replace with your dependent variable
+independent_vars = ['GDP', 'REER', 'GBI']  # replace with your regressors
+formula = f"{dependent_var} ~ {' + '.join(independent_vars)}"
 
-# --- Step 1: Normalize variables ---
-numeric_cols = [dep_var] + indep_vars
-df_norm = df.copy()
-for col in numeric_cols:
-    df_norm[col] = (df_norm[col] - df_norm[col].mean()) / df_norm[col].std()
+# --- Quantiles to estimate ---
+quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
 
-st.markdown("All variables have been standardized (mean = 0, SD = 1).")
-
-# --- Step 2: Location parameters (τ = 0.5) ---
-ref_q = 0.5
-formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
-location_model = quantreg(formula, df_norm).fit(q=ref_q)
-location_params = location_model.params
-location_se = location_model.bse
-location_p = location_model.pvalues
-
-# --- Step 3: Scale parameters (τ = 0.25–0.75) ---
-q_low, q_high = 0.25, 0.75
-model_low = quantreg(formula, df_norm).fit(q=q_low)
-model_high = quantreg(formula, df_norm).fit(q=q_high)
-
-scale_params = (model_high.params - model_low.params) / (q_high - q_low)
-scale_se = np.sqrt((model_high.bse**2 + model_low.bse**2) / ((q_high - q_low) ** 2))
-t_vals = scale_params / scale_se
-df_resid = len(df_norm) - len(indep_vars) - 1
-scale_p = 2 * (1 - stats.t.cdf(abs(t_vals), df=df_resid))
-
-# --- Step 4: Display Location and Scale Tables ---
-st.subheader(f"Location Parameters (τ = {ref_q})")
-loc_table = pd.DataFrame({
-    "Coefficient": location_params.round(3),
-    "Std. Error": location_se.round(3),
-    "P-Value": location_p.round(3)
-})
-st.dataframe(loc_table)
-
-st.subheader(f"Scale Parameters (τ = {q_low}–{q_high})")
-scale_table = pd.DataFrame({
-    "Coefficient": scale_params.round(3),
-    "Std. Error": scale_se.round(3),
-    "P-Value": scale_p.round(3)
-})
-st.dataframe(scale_table)
-
-# --- Step 5: MMQR Coefficients, SEs, and P-values Across Quantiles ---
-quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-mmqr_results = {}
-
+# --- Run quantile regressions (MMQR approximation) ---
+results = {}
 for q in quantiles:
-    coef_q = location_params + scale_params * q
-    se_q = np.sqrt(location_se**2 + (q**2) * scale_se**2)
-    t_vals = coef_q / se_q
-    p_q = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
+    model = smf.quantreg(formula, df)
+    results[q] = model.fit(q=q)
 
-    mmqr_results[q] = pd.DataFrame({
-        f"τ={q} Coef": coef_q.round(3),
-        f"τ={q} Std.Err": se_q.round(3),
-        f"τ={q} P-Value": p_q.round(3)
-    })
+# --- Collect coefficients, std. errors, and p-values ---
+coef_dict = {}
+for var in ['Intercept'] + independent_vars:
+    coef_dict[var] = []
+    for q in quantiles:
+        res = results[q]
+        coef = res.params[var]
+        se = res.bse[var]
+        pval = res.pvalues[var]
+        coef_dict[var].append(f"{coef:.3f}\n({se:.3f})\n[{pval:.3f}]")
 
-# --- Step 6: Combine all quantile results side-by-side ---
-mmqr_df = pd.concat(mmqr_results.values(), axis=1)
-st.subheader("MMQR Results: Coefficient – Std. Error – P-Value by Quantile")
-st.dataframe(mmqr_df)
+# --- Create final MMQR summary table ---
+mmqr_table = pd.DataFrame(coef_dict, index=[f"q{int(q*100):02d}" for q in quantiles]).T
+mmqr_table.index.name = "Variable"
 
-# --- Step 7: Plot Coefficient Dynamics ---
-st.subheader("Coefficient Dynamics by Quantile")
-fig, ax = plt.subplots(figsize=(8, 5))
-for var in indep_vars:
-    ax.plot(quantiles, [mmqr_results[q][f"τ={q} Coef"][var] for q in quantiles],
-            marker="o", label=var)
-ax.axhline(0, color="black", linewidth=0.8)
-ax.set_xlabel("Quantile (τ)")
-ax.set_ylabel("Coefficient (standardized)")
-ax.set_title("MMQR Coefficient Dynamics Across Quantiles")
-ax.legend()
-st.pyplot(fig)
+# --- Export to Word (stacked format: coef, std, p) ---
+from docx import Document
+from docx.shared import Pt
 
-# --- Step 8: Download Results ---
-out_text = []
-out_text.append("=== LOCATION PARAMETERS ===\n")
-out_text.append(loc_table.to_string())
-out_text.append("\n\n=== SCALE PARAMETERS ===\n")
-out_text.append(scale_table.to_string())
-out_text.append("\n\n=== MMQR RESULTS (Coef, Std.Err, P-Value by Quantile) ===\n")
-out_text.append(mmqr_df.to_string())
+doc = Document()
+doc.add_heading('MM-Quantile Regression Results', level=1)
 
-st.download_button(
-    "📥 Download MMQR Full Table (RTF)",
-    data="\n".join(out_text),
-    file_name="MMQR_Results_ByQuantile.rtf",
-    mime="application/rtf"
+table = doc.add_table(rows=1, cols=len(mmqr_table.columns) + 1)
+hdr_cells = table.rows[0].cells
+hdr_cells[0].text = 'Variable'
+for j, col in enumerate(mmqr_table.columns):
+    hdr_cells[j + 1].text = col
+
+for var in mmqr_table.index:
+    row = table.add_row().cells
+    row[0].text = var
+    for j, col in enumerate(mmqr_table.columns):
+        row[j + 1].text = str(mmqr_table.loc[var, col])
+
+# Style adjustment
+for row in table.rows:
+    for cell in row.cells:
+        for p in cell.paragraphs:
+            for run in p.runs:
+                run.font.size = Pt(10)
+
+doc.add_paragraph(
+    "\nNotes: Each cell shows coefficient, standard error (in parentheses), and p-value (in brackets)."
 )
+doc.save('MMQR_results.docx')
+
+print("✅ MMQR estimation and export completed successfully.")
+print(mmqr_table)
+
 
 # ============================================
 # Footer
