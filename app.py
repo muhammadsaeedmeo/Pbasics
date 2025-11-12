@@ -1,4 +1,3 @@
-# ============================================
 # Streamlit Panel Data Analysis App using MMQR but no p
 # ============================================
 import streamlit as st
@@ -12,8 +11,10 @@ import statsmodels.api as sm
 from scipy.stats import shapiro
 from scipy import stats
 from io import BytesIO
+from docx import Document  # <-- add this line
 import warnings
 warnings.filterwarnings("ignore")
+
 
 # ============================================
 # App Configuration
