@@ -207,7 +207,7 @@ formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
 mmqr_results = {}
 progress = st.progress(0)
 for i, tau in enumerate(quantiles):
-    model = smf.quantreg(formula, df_norm).fit(q=tau)
+    model = quantreg(formula, df_norm).fit(q=tau)
     mmqr_results[tau] = model
     progress.progress((i + 1) / len(quantiles))
 
@@ -244,7 +244,6 @@ st.download_button(
     file_name="MMQR_results_normalized.rtf",
     mime="application/rtf"
 )
-
 
 # ============================================
 # Footer
