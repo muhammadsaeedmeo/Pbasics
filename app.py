@@ -192,60 +192,69 @@ else:
 
 st.subheader("📊 Section 4: Multimodal Quantile Regression (MMQR) with Significance Tests")
 
-# Step 1. Select variables
+# Step 1. Variable setup
 dep_var = "IT"
 indep_vars = ["gbi", "GDP", "REER", "TGGE", "PS", "AT"]
-formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
+formula_vars = [dep_var] + indep_vars
 
-# Step 2. Normalize dataset
-df_norm = df.copy()
-for col in [dep_var] + indep_vars:
-    df_norm[col] = (df[col] - df[col].mean()) / df[col].std()
+# Step 2. Check available columns
+missing_vars = [v for v in formula_vars if v not in df.columns]
+if missing_vars:
+    st.error(f"Missing variables in dataset: {', '.join(missing_vars)}")
+else:
+    # Step 3. Normalize available variables
+    df_norm = df.copy()
+    for col in formula_vars:
+        df_norm[col] = (df[col] - df[col].mean()) / df[col].std()
 
-# Step 3. Define quantiles
-quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
+    # Step 4. Build formula
+    formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
 
-# Step 4. Fit Quantile Regression for each τ
-results_summary = []
-for tau in quantiles:
-    model = quantreg(formula, df_norm).fit(q=tau)
-    summary_frame = model.summary_frame(alpha=0.05)
-    summary_frame["Quantile"] = tau
-    results_summary.append(summary_frame.reset_index())
+    # Step 5. Define quantiles
+    quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
 
-# Step 5. Combine results
-mmqr_full = pd.concat(results_summary, axis=0)
-mmqr_full.rename(columns={
-    "index": "Variable",
-    "coef": "Coefficient",
-    "std err": "Std_Error",
-    "P>|t|": "p_value"
-}, inplace=True)
+    # Step 6. Run quantile regressions
+    results_summary = []
+    for tau in quantiles:
+        model = quantreg(formula, df_norm).fit(q=tau)
+        frame = model.summary_frame(alpha=0.05)
+        frame["Quantile"] = tau
+        results_summary.append(frame.reset_index())
 
-# Step 6. Display results
-st.markdown("### MMQR Coefficients with Standard Errors and p-values")
-st.dataframe(mmqr_full.style.format({
-    "Coefficient": "{:.4f}",
-    "Std_Error": "{:.4f}",
-    "p_value": "{:.4f}"
-}))
+    # Step 7. Combine results
+    mmqr_full = pd.concat(results_summary, axis=0)
+    mmqr_full.rename(columns={
+        "index": "Variable",
+        "coef": "Coefficient",
+        "std err": "Std_Error",
+        "P>|t|": "p_value"
+    }, inplace=True)
 
-# Step 7. Plot coefficients across quantiles
-plt.figure(figsize=(10,6))
-for var in indep_vars:
-    subset = mmqr_full[mmqr_full["Variable"] == var]
-    plt.plot(subset["Quantile"], subset["Coefficient"], marker='o', label=var)
-plt.title("MMQR Coefficients Across Quantiles (Normalized Data)")
-plt.xlabel("Quantile (τ)")
-plt.ylabel("Coefficient")
-plt.legend()
-st.pyplot(plt)
+    # Step 8. Display results
+    st.markdown("### MMQR Coefficients with Standard Errors and p-values")
+    st.dataframe(mmqr_full.style.format({
+        "Coefficient": "{:.4f}",
+        "Std_Error": "{:.4f}",
+        "p_value": "{:.4f}"
+    }))
 
-# Step 8. Export option
-buffer = BytesIO()
-mmqr_full.to_csv(buffer, index=False)
-st.download_button("Download MMQR Full Results (CSV)", data=buffer.getvalue(),
-                   file_name="MMQR_results.csv", mime="text/csv")
+    # Step 9. Plot coefficients across quantiles
+    plt.figure(figsize=(10,6))
+    for var in indep_vars:
+        if var in mmqr_full["Variable"].unique():
+            subset = mmqr_full[mmqr_full["Variable"] == var]
+            plt.plot(subset["Quantile"], subset["Coefficient"], marker='o', label=var)
+    plt.title("MMQR Coefficients Across Quantiles (Normalized Data)")
+    plt.xlabel("Quantile (τ)")
+    plt.ylabel("Coefficient")
+    plt.legend()
+    st.pyplot(plt)
+
+    # Step 10. Export results
+    buffer = BytesIO()
+    mmqr_full.to_csv(buffer, index=False)
+    st.download_button("Download MMQR Full Results (CSV)", data=buffer.getvalue(),
+                       file_name="MMQR_results.csv", mime="text/csv")
 
 # ============================================
 # Footer
