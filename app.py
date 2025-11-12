@@ -186,86 +186,71 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-* ==============================================================
-* 🟩 MMQR (Machado & Santos Silva, 2019) – FULL IMPLEMENTATION
-* ==============================================================
+# ===============================================================
+# 🟩 MMQR (Machado & Santos Silva, 2019) – FULL IMPLEMENTATION
+# ===============================================================
 
-clear all
-set more off
+st.subheader("📊 Method of Moments Quantile Regression (MMQR)")
 
-*--- Load data
-use "your_data.dta", clear
+y_var = st.selectbox("Select dependent variable (Y):", df.columns, index=0)
+x_vars = st.multiselect("Select independent variables (X):", [c for c in df.columns if c != y_var])
 
-*--- Install dependencies once
-ssc install moremata, replace
+if y_var and x_vars:
+    try:
+        # Normalize data
+        df_norm = df.copy()
+        for col in [y_var] + x_vars:
+            df_norm[col] = (df[col] - df[col].mean()) / df[col].std()
 
-*--- Define variables
-local depvar tourism
-local indepvars reer gdp inflation exchange
+        # Regression formula
+        formula = f"{y_var} ~ {' + '.join(x_vars)}"
+        quantiles = np.arange(0.05, 0.96, 0.05)
 
-*--- Create results file
-capture postclose mmqr_results
-postfile mmqr_results str15 component str20 varname quantile coef se pval using mmqr_results.dta, replace
+        results = []
+        for tau in quantiles:
+            model = quantreg(formula, df_norm).fit(q=tau)
+            res = pd.DataFrame({
+                "Quantile": tau,
+                "Variable": model.params.index,
+                "Coefficient": model.params.values,
+                "Std_Error": model.bse.values,
+                "t_Value": model.tvalues.values,
+                "p_Value": model.pvalues.values
+            })
+            results.append(res)
 
-*--- Loop through quantiles
-foreach q of numlist 0.05(0.05)0.95 {
+        results_df = pd.concat(results, ignore_index=True)
 
-    * Run MMQR with both location and scale components
-    quietly mmqreg `depvar' `indepvars', quantile(`q') location scale
+        st.write("### MMQR Coefficients with Standard Errors and p-values")
+        st.dataframe(results_df.style.format({
+            "Coefficient": "{:.4f}",
+            "Std_Error": "{:.4f}",
+            "t_Value": "{:.3f}",
+            "p_Value": "{:.3f}"
+        }))
 
-    * Extract location parameters
-    matrix bl = e(b_location)
-    matrix Vl = e(V_location)
-    local nloc = colsof(bl)
+        # Plot coefficients
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for var in [y_var] + x_vars:
+            subset = results_df[results_df["Variable"] == var]
+            ax.plot(subset["Quantile"], subset["Coefficient"], label=var)
+            ax.fill_between(
+                subset["Quantile"],
+                subset["Coefficient"] - 1.96 * subset["Std_Error"],
+                subset["Coefficient"] + 1.96 * subset["Std_Error"],
+                alpha=0.2
+            )
+        ax.set_title("MMQR Coefficients Across Quantiles")
+        ax.set_xlabel("Quantile (τ)")
+        ax.set_ylabel("Coefficient")
+        ax.legend()
+        st.pyplot(fig)
 
-    forvalues i = 1/`nloc' {
-        local vname : colname bl[`i']
-        local coef = bl[1,`i']
-        local se = sqrt(Vl[`i',`i'])
-        local pval = 2*ttail(e(df_r), abs(`coef'/`se'))
-        post mmqr_results ("location") ("`vname'") ("`q'") (`coef') (`se') (`pval')
-    }
+    except Exception as e:
+        st.error(f"Error during MMQR estimation: {e}")
 
-    * Extract scale parameters
-    matrix bs = e(b_scale)
-    matrix Vs = e(V_scale)
-    local nsc = colsof(bs)
-
-    forvalues i = 1/`nsc' {
-        local vname : colname bs[`i']
-        local coef = bs[1,`i']
-        local se = sqrt(Vs[`i',`i'])
-        local pval = 2*ttail(e(df_r), abs(`coef'/`se'))
-        post mmqr_results ("scale") ("`vname'") ("`q'") (`coef') (`se') (`pval')
-    }
-}
-postclose mmqr_results
-
-*--- Use and organize results
-use mmqr_results.dta, clear
-destring quantile, replace force
-
-*--- Plot example: REER location coefficient profile
-preserve
-keep if varname == "reer" & component == "location"
-gen ub = coef + 1.96*se
-gen lb = coef - 1.96*se
-
-twoway (rarea ub lb quantile, color(gs14)) ///
-       (line coef quantile, lcolor(blue) lwidth(medthick)) ///
-       , title("MMQR Location Coefficient Profile") ///
-         subtitle("Variable: REER") ///
-         ytitle("Coefficient Estimate") ///
-         xtitle("Quantile (τ)") ///
-         legend(off)
-restore
-
-*--- Export full results
-export excel using "MMQR_full_results.xlsx", firstrow(variables) replace
-
-*--- Display in Stata
-list component varname quantile coef se pval, clean
-
+else:
+    st.warning("Please select both dependent and independent variables.")
 
 # ============================================
 # Footer
