@@ -286,20 +286,20 @@ ax.set_title("MMQR Coefficient Dynamics Across Quantiles")
 ax.legend()
 st.pyplot(fig)
 
-# --- Step 8: Download formatted results ---
+# --- Step 8: Download formatted results (Word-friendly tab format) ---
 out_text = []
 out_text.append("=== LOCATION PARAMETERS ===\n")
-out_text.append(loc_table.to_string())
-out_text.append("\n\n=== SCALE PARAMETERS ===\n")
-out_text.append(scale_table.to_string())
-out_text.append("\n\n=== MMQR COEFFICIENTS (Coef, Std.Err, P-Value) ACROSS QUANTILES ===\n")
-out_text.append(mmqr_df.to_string())
+out_text.append(loc_table.to_csv(sep="\t"))
+out_text.append("\n=== SCALE PARAMETERS ===\n")
+out_text.append(scale_table.to_csv(sep="\t"))
+out_text.append("\n=== MMQR COEFFICIENTS (Coef, Std.Err, P-Value) ACROSS QUANTILES ===\n")
+out_text.append(mmqr_df.to_csv(sep="\t"))
 
 st.download_button(
-    "📥 Download MMQR Compact Results (RTF)",
+    "📥 Download MMQR Compact Results (Word Table Format)",
     data="\n".join(out_text),
-    file_name="MMQR_Compact_Results.rtf",
-    mime="application/rtf"
+    file_name="MMQR_Compact_Results.doc",
+    mime="application/msword"
 )
 
 
