@@ -1,5 +1,5 @@
 # ============================================
-# Streamlit Panel Data Analysis App using MMQR
+# Streamlit Panel Data Analysis App using MMQR but no p
 # ============================================
 import streamlit as st
 import pandas as pd
@@ -186,71 +186,96 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-# ===============================================================
-# 🟩 MMQR (Machado & Santos Silva, 2019) – FULL IMPLEMENTATION
-# ===============================================================
+# ============================================
+# Section 4: MMQR with Location and Scale Parameters
+# ============================================
 
-st.subheader("📊 Method of Moments Quantile Regression (MMQR)")
+st.header("Section 4: Method of Moments Quantile Regression (MMQR) with Location–Scale Decomposition")
 
-y_var = st.selectbox("Select dependent variable (Y):", df.columns, index=0)
-x_vars = st.multiselect("Select independent variables (X):", [c for c in df.columns if c != y_var])
+# --- Step 1: Normalize variables ---
+numeric_cols = [dep_var] + indep_vars
+df_norm = df.copy()
+for col in numeric_cols:
+    df_norm[col] = (df_norm[col] - df_norm[col].mean()) / df_norm[col].std()
 
-if y_var and x_vars:
-    try:
-        # Normalize data
-        df_norm = df.copy()
-        for col in [y_var] + x_vars:
-            df_norm[col] = (df[col] - df[col].mean()) / df[col].std()
+st.markdown("All variables have been standardized (mean = 0, SD = 1).")
 
-        # Regression formula
-        formula = f"{y_var} ~ {' + '.join(x_vars)}"
-        quantiles = np.arange(0.05, 0.96, 0.05)
+# --- Step 2: Reference quantile for location (usually median) ---
+ref_q = 0.5
+formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
+location_model = quantreg(formula, df_norm).fit(q=ref_q)
+location_params = location_model.params
+location_se = location_model.bse
+location_p = location_model.pvalues
 
-        results = []
-        for tau in quantiles:
-            model = quantreg(formula, df_norm).fit(q=tau)
-            res = pd.DataFrame({
-                "Quantile": tau,
-                "Variable": model.params.index,
-                "Coefficient": model.params.values,
-                "Std_Error": model.bse.values,
-                "t_Value": model.tvalues.values,
-                "p_Value": model.pvalues.values
-            })
-            results.append(res)
+# --- Step 3: Scale parameters from upper–lower quantile difference ---
+q_low, q_high = 0.25, 0.75
+model_low = quantreg(formula, df_norm).fit(q=q_low)
+model_high = quantreg(formula, df_norm).fit(q=q_high)
 
-        results_df = pd.concat(results, ignore_index=True)
+scale_params = (model_high.params - model_low.params) / (q_high - q_low)
+scale_se = np.sqrt((model_high.bse**2 + model_low.bse**2) / ((q_high - q_low) ** 2))
+t_vals = scale_params / scale_se
+df_resid = len(df_norm) - len(indep_vars) - 1
+scale_p = 2 * (1 - stats.t.cdf(abs(t_vals), df=df_resid))
 
-        st.write("### MMQR Coefficients with Standard Errors and p-values")
-        st.dataframe(results_df.style.format({
-            "Coefficient": "{:.4f}",
-            "Std_Error": "{:.4f}",
-            "t_Value": "{:.3f}",
-            "p_Value": "{:.3f}"
-        }))
+# --- Step 4: Display tables ---
+st.subheader(f"Location Parameters (τ = {ref_q})")
+loc_table = pd.DataFrame({
+    "Coefficient": location_params.round(3),
+    "Std. Error": location_se.round(3),
+    "P-Value": location_p.round(3)
+})
+st.dataframe(loc_table)
 
-        # Plot coefficients
-        fig, ax = plt.subplots(figsize=(10, 6))
-        for var in [y_var] + x_vars:
-            subset = results_df[results_df["Variable"] == var]
-            ax.plot(subset["Quantile"], subset["Coefficient"], label=var)
-            ax.fill_between(
-                subset["Quantile"],
-                subset["Coefficient"] - 1.96 * subset["Std_Error"],
-                subset["Coefficient"] + 1.96 * subset["Std_Error"],
-                alpha=0.2
-            )
-        ax.set_title("MMQR Coefficients Across Quantiles")
-        ax.set_xlabel("Quantile (τ)")
-        ax.set_ylabel("Coefficient")
-        ax.legend()
-        st.pyplot(fig)
+st.subheader(f"Scale Parameters (τ = {q_low}–{q_high})")
+scale_table = pd.DataFrame({
+    "Coefficient": scale_params.round(3),
+    "Std. Error": scale_se.round(3),
+    "P-Value": scale_p.round(3)
+})
+st.dataframe(scale_table)
 
-    except Exception as e:
-        st.error(f"Error during MMQR estimation: {e}")
+# --- Step 5: MMQR coefficients across quantiles ---
+quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
+mmqr_results = {}
+for q in quantiles:
+    mmqr_coeff = location_params + scale_params * q
+    mmqr_results[q] = mmqr_coeff
 
-else:
-    st.warning("Please select both dependent and independent variables.")
+st.subheader("MMQR Coefficients Across Quantiles")
+mmqr_df = pd.DataFrame(mmqr_results).round(3)
+st.dataframe(mmqr_df)
+
+# --- Step 6: Plot coefficient dynamics ---
+st.subheader("Coefficient Dynamics by Quantile")
+fig, ax = plt.subplots(figsize=(8, 5))
+for var in indep_vars:
+    ax.plot(quantiles, [mmqr_df.loc[var, q] for q in quantiles],
+            marker="o", label=var)
+ax.axhline(0, color="black", linewidth=0.8)
+ax.set_xlabel("Quantile (τ)")
+ax.set_ylabel("Coefficient (standardized)")
+ax.set_title("MMQR Coefficient Dynamics")
+ax.legend()
+st.pyplot(fig)
+
+# --- Step 7: Download combined results ---
+out_text = []
+out_text.append("=== LOCATION PARAMETERS ===\n")
+out_text.append(loc_table.to_string())
+out_text.append("\n\n=== SCALE PARAMETERS ===\n")
+out_text.append(scale_table.to_string())
+out_text.append("\n\n=== MMQR COEFFICIENTS ACROSS QUANTILES ===\n")
+out_text.append(mmqr_df.to_string())
+
+st.download_button(
+    "📥 Download MMQR Location–Scale Results (RTF)",
+    data="\n".join(out_text),
+    file_name="MMQR_Location_Scale_Results.rtf",
+    mime="application/rtf"
+)
+
 
 # ============================================
 # Footer
