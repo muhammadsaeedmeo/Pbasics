@@ -286,21 +286,44 @@ ax.set_title("MMQR Coefficient Dynamics Across Quantiles")
 ax.legend()
 st.pyplot(fig)
 
-# --- Step 8: Download formatted results (Word-friendly tab format) ---
+# --- Step 8: Download Results (Preserve Visual Formatting for Word) ---
+
+# Prepare pretty-formatted tables
+def format_table(df):
+    # align columns manually for fixed-width display
+    col_widths = [max(len(str(x)) for x in df[c]) for c in df.columns]
+    header = "  ".join([f"{c:<{w}}" for c, w in zip(df.columns, col_widths)])
+    rows = [
+        "  ".join([f"{str(v):<{w}}" for v, w in zip(row, col_widths)])
+        for row in df.values
+    ]
+    return "\n".join([header] + rows)
+
 out_text = []
 out_text.append("=== LOCATION PARAMETERS ===\n")
-out_text.append(loc_table.to_csv(sep="\t"))
-out_text.append("\n=== SCALE PARAMETERS ===\n")
-out_text.append(scale_table.to_csv(sep="\t"))
-out_text.append("\n=== MMQR COEFFICIENTS (Coef, Std.Err, P-Value) ACROSS QUANTILES ===\n")
-out_text.append(mmqr_df.to_csv(sep="\t"))
+out_text.append(loc_table.to_string())
+out_text.append("\n\n=== SCALE PARAMETERS ===\n")
+out_text.append(scale_table.to_string())
+out_text.append("\n\n=== MMQR COEFFICIENTS (Coef, Std.Err, P-Value) ACROSS QUANTILES ===\n")
+out_text.append(mmqr_df.to_string())
 
-st.download_button(
-    "📥 Download MMQR Compact Results (Word Table Format)",
-    data="\n".join(out_text),
-    file_name="MMQR_Compact_Results.doc",
-    mime="application/msword"
-)
+# Save as .docx with monospaced formatting
+from docx import Document
+from docx.shared import Pt
+
+doc = Document()
+doc.add_heading("MMQR Results", level=1)
+
+for section in out_text:
+    p = doc.add_paragraph(section)
+    p.style.font.name = "Courier New"
+    p.style.font.size = Pt(10)
+
+file_path = "/mnt/data/MMQR_Formatted.docx"
+doc.save(file_path)
+
+st.success(f"Word document created: {file_path}")
+st.markdown(f"[Download formatted MMQR results]({file_path})")
 
 
 # ============================================
