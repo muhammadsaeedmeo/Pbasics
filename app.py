@@ -186,97 +186,72 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-# ============================================================
-# 🔹 SECTION 4: MULTIMODAL QUANTILE REGRESSION (MMQR)
-# ============================================================
+# ===============================================================
+# 🟩 SECTION 4: METHOD OF MOMENTS QUANTILE REGRESSION (MMQR)
+# ===============================================================
 
-st.subheader("📊 Section 4: Multimodal Quantile Regression (MMQR)")
+st.subheader("📊 Method of Moments Quantile Regression (MMQR)")
 
-# --- Variable Selection Area ---
-y_var = st.selectbox("Select Dependent Variable (DV):", df.columns)
-x_vars = st.multiselect("Select Independent Variables (IVs):", df.columns)
+# Variable selection (user already defined in earlier sections)
+y_var = st.selectbox("Select dependent variable (Y):", df.columns, index=0)
+x_vars = st.multiselect("Select independent variables (X):", [c for c in df.columns if c != y_var])
 
-# --- Run MMQR only when variables selected ---
-if not y_var or not x_vars:
-    st.warning("Please select both dependent and independent variables above.")
-else:
+if y_var and x_vars:
     try:
-        # 1. Normalize selected variables
+        # Normalize data (z-score)
         df_norm = df.copy()
-        selected_vars = [y_var] + x_vars
-        for col in selected_vars:
-            if df_norm[col].dtype in ['float64', 'int64']:
-                df_norm[col] = (df_norm[col] - df_norm[col].mean()) / df_norm[col].std()
+        for col in [y_var] + x_vars:
+            df_norm[col] = (df[col] - df[col].mean()) / df[col].std()
 
-        # 2. Build model formula dynamically
+        # Create model formula
         formula = f"{y_var} ~ {' + '.join(x_vars)}"
 
-        # 3. Quantiles to estimate
-        quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-
-        # 4. Run MMQR
-        results_summary = []
+        quantiles = np.arange(0.05, 0.96, 0.05)
+        results = []
         for tau in quantiles:
-            model = quantreg(formula, df_norm).fit(q=tau)
-            frame = model.summary_frame(alpha=0.05)
-            frame["Quantile"] = tau
-            results_summary.append(frame.reset_index())
-
-        # 5. Combine results across quantiles
-        mmqr_full = pd.concat(results_summary, axis=0)
-        mmqr_full.rename(columns={
-            "index": "Variable",
-            "coef": "Coefficient",
-            "std err": "Std_Error",
-            "P>|t|": "p_value"
-        }, inplace=True)
-
-        # 6. Add significance stars for aesthetics
-        def starify(p):
-            if p < 0.01:
-                return "***"
-            elif p < 0.05:
-                return "**"
-            elif p < 0.10:
-                return "*"
-            else:
-                return ""
-        mmqr_full["Significance"] = mmqr_full["p_value"].apply(starify)
-
-        # 7. Display full results table
-        st.markdown("### MMQR Results (with Normalization, SEs, and p-values)")
-        st.dataframe(
-            mmqr_full.style.format({
-                "Coefficient": "{:.4f}",
-                "Std_Error": "{:.4f}",
-                "p_value": "{:.4f}"
+            model = smf.quantreg(formula, df_norm).fit(q=tau)
+            res = pd.DataFrame({
+                "Quantile": tau,
+                "Variable": model.params.index,
+                "Coefficient": model.params.values,
+                "Std_Error": model.bse.values,
+                "t_Value": model.tvalues.values,
+                "p_Value": model.pvalues.values
             })
-        )
+            results.append(res)
 
-        # 8. Plot coefficients across quantiles
-        plt.figure(figsize=(10, 6))
-        for var in x_vars:
-            subset = mmqr_full[mmqr_full["Variable"] == var]
-            if not subset.empty:
-                plt.plot(subset["Quantile"], subset["Coefficient"], marker='o', label=var)
-        plt.title(f"MMQR Coefficients Across Quantiles ({y_var} as DV)")
-        plt.xlabel("Quantile (τ)")
-        plt.ylabel("Coefficient (Normalized)")
-        plt.legend()
-        st.pyplot(plt)
+        results_df = pd.concat(results, ignore_index=True)
 
-        # 9. Export results to CSV for academic use
-        buffer = BytesIO()
-        mmqr_full.to_csv(buffer, index=False)
-        st.download_button(
-            "📥 Download MMQR Results (CSV)",
-            data=buffer.getvalue(),
-            file_name="MMQR_results.csv",
-            mime="text/csv"
-        )
+        st.write("### MMQR Coefficients with Standard Errors and p-values")
+        st.dataframe(results_df.style.format({
+            "Coefficient": "{:.4f}",
+            "Std_Error": "{:.4f}",
+            "t_Value": "{:.3f}",
+            "p_Value": "{:.3f}"
+        }))
+
+        # Plot coefficients across quantiles
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for var in [y_var] + x_vars:
+            subset = results_df[results_df["Variable"] == var]
+            ax.plot(subset["Quantile"], subset["Coefficient"], label=var)
+            ax.fill_between(
+                subset["Quantile"],
+                subset["Coefficient"] - 1.96 * subset["Std_Error"],
+                subset["Coefficient"] + 1.96 * subset["Std_Error"],
+                alpha=0.2
+            )
+        ax.set_title("MMQR Coefficients Across Quantiles")
+        ax.set_xlabel("Quantile (τ)")
+        ax.set_ylabel("Coefficient")
+        ax.legend()
+        st.pyplot(fig)
 
     except Exception as e:
         st.error(f"Error during MMQR estimation: {e}")
+
+else:
+    st.warning("Please select both dependent and independent variables.")
 
 
 # ============================================
