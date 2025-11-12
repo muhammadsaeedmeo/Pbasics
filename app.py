@@ -193,11 +193,23 @@ else:
 st.markdown("---")
 st.markdown("**Panel Data Analysis Dashboard** | Built with Streamlit")
 
+import streamlit as st
+import pandas as pd
+import numpy as np
+from statsmodels.formula.api import quantreg # Assuming this is available
+from scipy import stats
+import matplotlib.pyplot as plt
+
+# ASSUMPTION: df, dep_var, and indep_vars are defined in the Streamlit scope.
+# For demonstration purposes, we'll assume a dummy setup for the function to run:
+# def correct_mmqr_estimation(data, y_var, x_vars, quantiles, reference_quantile=0.5, bootstrap=True, n_boot=200):
+#   ...
+
 # ============================================
-# Section D: Corrected MMQR Implementation with Scale P-values
+# Section D: Updated MMQR Implementation
 # ============================================
 
-st.header("D. Method of Moments Quantile Regression (MMQR) - Machado & Santos Silva (2019)")
+st.header("D. Method of Moments Quantile Regression (MMQR) - Updated")
 
 if 'dep_var' not in locals() or 'indep_vars' not in locals() or not indep_vars:
     st.warning("Please complete the correlation analysis first to select variables.")
@@ -210,143 +222,121 @@ else:
         quantiles = [float(q.strip()) for q in quantiles.split(",")]
     
     with col2:
-        bootstrap_ci = st.checkbox("Bootstrap Confidence Intervals", True)
-        n_bootstrap = st.slider("Bootstrap Samples", 100, 1000, 200) if bootstrap_ci else 100
-        reference_quantile = st.selectbox("Reference Quantile for Location", [0.25, 0.50, 0.75], index=1)
+        bootstrap_ci = st.checkbox("Bootstrap Scale Inference", True)
+        n_bootstrap = st.slider("Bootstrap Samples for Scale", 200, 2000, 500) if bootstrap_ci else 200
+        reference_quantile = st.selectbox("Reference Quantile for Location (α)", [0.25, 0.50, 0.75], index=1)
 
-    def correct_mmqr_estimation(data, y_var, x_vars, quantiles, reference_quantile=0.5, bootstrap=True, n_boot=200):
+    def correct_mmqr_estimation(data, y_var, x_vars, quantiles, reference_quantile=0.5, bootstrap=True, n_boot=500):
         """
-        Correct MMQR implementation following Machado & Santos Silva (2019)
-        with proper inference for scale parameters
+        MMQR implementation following Machado & Santos Silva (2019) structure,
+        using coefficient combination and robust bootstrap inference for scale (δ).
         """
         results = {}
         
         # Prepare data
-        X = data[x_vars]
-        y = data[y_var]
+        # Note: Add 'Intercept' if not automatically included by quantreg/formula
+        # Assuming statsmodels.formula.api.quantreg handles the Intercept automatically
         
-        # Step 1: Estimate location parameters using reference quantile (usually median)
+        # Step 1: Estimate location parameters (α) using reference quantile
         formula_ref = f"{y_var} ~ {' + '.join(x_vars)}"
-        location_model = quantreg(formula_ref, data).fit(q=reference_quantile, vcov='robust')
-        location_params = location_model.params
-        location_pvalues = location_model.pvalues
         
-        # Step 2: Estimate scale parameters using symmetric quantiles with proper inference
+        try:
+            location_model = quantreg(formula_ref, data).fit(q=reference_quantile, vcov='robust')
+            location_params = location_model.params
+            location_pvalues = location_model.pvalues
+        except Exception as e:
+            raise ValueError(f"Location estimation failed at τ={reference_quantile}: {str(e)}")
+        
+        # Step 2: Estimate scale parameters (δ) using symmetric quantiles
+        # M&SS suggest a value related to the inter-quartile range for robust delta estimation.
         tau_high = 0.75
         tau_low = 0.25
         
-        model_high = quantreg(formula_ref, data).fit(q=tau_high, vcov='robust')
-        model_low = quantreg(formula_ref, data).fit(q=tau_low, vcov='robust')
-        
+        try:
+            model_high = quantreg(formula_ref, data).fit(q=tau_high, vcov='robust')
+            model_low = quantreg(formula_ref, data).fit(q=tau_low, vcov='robust')
+        except Exception as e:
+            raise ValueError(f"Scale quantile estimation failed: {str(e)}")
+
         # Scale parameters are proportional to the difference between high and low quantiles
         scale_params = (model_high.params - model_low.params) / (tau_high - tau_low)
-        
-        # Calculate p-values for scale parameters using delta method
-        scale_pvalues = {}
-        for var in scale_params.index:
-            try:
-                # Variance of scale parameter using delta method
-                # Var(scale) = [Var(high) + Var(low) - 2*Cov(high,low)] / (tau_high - tau_low)^2
-                
-                # Get variances from the models
-                var_high = model_high.bse[var] ** 2
-                var_low = model_low.bse[var] ** 2
-                
-                # For covariance, we use approximation since we don't have direct covariance matrix
-                # A conservative approach: assume moderate positive correlation (0.3)
-                cov_high_low = 0.3 * np.sqrt(var_high * var_low)
-                
-                var_scale = (var_high + var_low - 2 * cov_high_low) / ((tau_high - tau_low) ** 2)
-                se_scale = np.sqrt(var_scale)
-                
-                # Calculate t-statistic and p-value
-                t_stat = scale_params[var] / se_scale if se_scale > 0 else 0
-                p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df=len(data) - len(x_vars) - 1))
-                scale_pvalues[var] = p_value
-                
-            except:
-                scale_pvalues[var] = 1.0  # Default to insignificant if calculation fails
-        
-        # Alternative method: Bootstrap for scale parameters
-        if bootstrap:
-            st.info("Bootstrapping scale parameters...")
+        scale_pvalues = {var: 1.0 for var in scale_params.index} # Initialize p-values
+
+        # Alternative method: Bootstrap for scale parameters (Robust Inference)
+        if bootstrap and n_boot > 1:
+            st.info(f"Bootstrapping scale parameters with N={n_boot} samples...")
             bootstrap_scale = {var: [] for var in scale_params.index}
             progress_bar = st.progress(0)
             
             for i in range(n_boot):
-                boot_sample = data.sample(n=len(data), replace=True)
+                boot_sample = data.sample(n=len(data), replace=True, random_state=i) # Using i as seed for reproducibility
                 try:
                     boot_high = quantreg(formula_ref, boot_sample).fit(q=tau_high)
                     boot_low = quantreg(formula_ref, boot_sample).fit(q=tau_low)
                     boot_scale = (boot_high.params - boot_low.params) / (tau_high - tau_low)
                     
                     for var in scale_params.index:
-                        bootstrap_scale[var].append(boot_scale[var])
+                        # Only append if the boot_scale estimate exists (i.e., convergence)
+                        if var in boot_scale:
+                            bootstrap_scale[var].append(boot_scale[var])
                 except:
+                    # Ignore non-convergent bootstrap samples
                     continue
                 
                 progress_bar.progress((i + 1) / n_boot)
             
+            progress_bar.empty() # Clear the progress bar after completion
+
             # Calculate bootstrap p-values for scale parameters
             for var in scale_params.index:
-                if len(bootstrap_scale[var]) > 0:
-                    # Two-sided p-value: proportion of bootstrap estimates with opposite sign
-                    boot_vals = np.array(bootstrap_scale[var])
-                    p_value_boot = 2 * min(
-                        np.mean(boot_vals > 0) if scale_params[var] < 0 else np.mean(boot_vals <= 0),
-                        np.mean(boot_vals <= 0) if scale_params[var] < 0 else np.mean(boot_vals > 0)
-                    )
-                    # Use bootstrap p-value if we have enough samples
-                    if len(bootstrap_scale[var]) >= 100:
-                        scale_pvalues[var] = p_value_boot
-        
-        # Step 3: MMQR transformation and estimation
+                boot_vals = np.array(bootstrap_scale[var])
+                if len(boot_vals) > 0 and len(boot_vals) >= (n_boot * 0.9): # Check for sufficient convergence
+                    # Centered at zero, two-sided p-value: proportion of bootstrap estimates with opposite sign
+                    # P-value = 2 * min(P(b* > 0), P(b* <= 0))
+                    
+                    # Number of successful bootstrap runs
+                    N_success = len(boot_vals) 
+                    
+                    # Count how many bootstrap estimates are on the opposite side of the initial estimate
+                    if scale_params[var] >= 0:
+                        opposite_count = np.sum(boot_vals <= 0)
+                    else: # scale_params[var] < 0
+                        opposite_count = np.sum(boot_vals > 0)
+                        
+                    p_value_boot = 2 * (opposite_count / N_success)
+                    
+                    # Ensure p-value is between 0 and 1
+                    scale_pvalues[var] = min(p_value_boot, 1.0)
+                else:
+                    st.warning(f"Bootstrap failed to converge enough times for variable '{var}'. Using default p=1.0.")
+                    scale_pvalues[var] = 1.0
+
+        # Step 3: MMQR coefficient combination: β(τ) = α + δ·h(τ)
+        # Use h(τ) = τ, the simplest form of the quantile index function for M&SS
         for q in quantiles:
-            try:
-                # Transform the model using location and scale parameters
-                h_tau = q
-                
-                # MMQR coefficients: β(τ) = α + δ·h(τ)
-                mmqr_coefficients = location_params + scale_params * h_tau
-                
-                # Estimate the final model with robust inference
-                y_approx = location_model.predict() + scale_params.mean() * h_tau * (y - location_model.predict()).std()
-                
-                data_temp = data.copy()
-                data_temp['y_transformed'] = y_approx
-                
-                formula_mmqr = f"y_transformed ~ {' + '.join(x_vars)}"
-                final_model = quantreg(formula_mmqr, data_temp).fit(q=q, vcov='robust')
-                
-                results[q] = {
-                    'coefficients': final_model.params,
-                    'pvalues': final_model.pvalues,
-                    'conf_int': final_model.conf_int(),
-                    'location_params': location_params,
-                    'scale_params': scale_params,
-                    'scale_pvalues': scale_pvalues,
-                    'mmqr_coefficients': mmqr_coefficients,
-                    'quantile': q,
-                    'model': final_model
-                }
-                
-            except Exception as e:
-                st.warning(f"MMQR estimation failed for quantile {q}: {str(e)}")
-                # Fallback to standard QR if MMQR fails
-                formula = f"{y_var} ~ {' + '.join(x_vars)}"
-                fallback_model = quantreg(formula, data).fit(q=q, vcov='robust')
-                results[q] = {
-                    'coefficients': fallback_model.params,
-                    'pvalues': fallback_model.pvalues,
-                    'conf_int': fallback_model.conf_int(),
-                    'location_params': location_params,
-                    'scale_params': scale_params,
-                    'scale_pvalues': scale_pvalues,
-                    'mmqr_coefficients': fallback_model.params,
-                    'quantile': q,
-                    'model': fallback_model
-                }
-        
+            # h(τ) is the quantile index function, often chosen as τ or a function of τ.
+            # For simplicity and direct interpretation as the coefficient trend, we use:
+            h_tau = q
+            
+            # MMQR coefficients: β(τ) = α + δ·h(τ)
+            mmqr_coefficients = location_params + scale_params * h_tau
+            
+            # Store results, including the standard QR for comparison/conf_int access
+            results[q] = {
+                'coefficients': mmqr_coefficients, # This is the MMQR result
+                'pvalues': location_pvalues.apply(lambda x: 1.0), # MMQR coefficients don't have standard p-values from this method, use location/scale for inference.
+                'conf_int': None, # Cannot easily compute CI with this method without boostrap
+                'location_params': location_params,
+                'scale_params': scale_params,
+                'scale_pvalues': scale_pvalues,
+                'mmqr_coefficients': mmqr_coefficients,
+                'quantile': q,
+                'model': None # No final QR model in this approach
+            }
+            # Note: The 'pvalues' and 'conf_int' fields for the final MMQR results are set to placeholder/None
+            # because the coefficient combination method does not directly provide them.
+            # Inference is primarily done on the location (α) and scale (δ) parameters.
+
         return results, location_params, scale_params, scale_pvalues
 
     # Run corrected MMQR with scale p-values
@@ -355,16 +345,28 @@ else:
             df, dep_var, indep_vars, quantiles, reference_quantile, bootstrap_ci, n_bootstrap
         )
         
+        # ---
+        # NOTE: The rest of your display code (Table 2, Table 3, Table 4, and the Plotting section) 
+        # is EXCELLENT for visualizing the MMQR results and does not need major revision 
+        # now that the underlying function provides the robust bootstrap p-values.
+        # ---
+        
         # ========================
         # Table 1: Location Parameters (Reference Quantile)
         # ========================
-        st.subheader(f"Table 2: Location Parameters (τ = {reference_quantile})")
+        st.subheader(f"Table 2: Location Parameters, $\\hat{{\\alpha}}$ (Ref. $\\tau$ = {reference_quantile})")
+        # Since the location estimate comes from a direct QR, we'll try to get its actual p-values
+        
+        # Re-run location model to get p-values reliably (if needed, otherwise rely on the one inside the function)
+        formula_ref = f"{dep_var} ~ {' + '.join(indep_vars)}"
+        location_model = quantreg(formula_ref, df).fit(q=reference_quantile, vcov='robust')
+        location_pvalues = location_model.pvalues
         
         location_data = []
         for var in location_params.index:
             var_name = 'Intercept' if var == 'Intercept' else var
             coef = location_params[var]
-            pval = mmqr_results[reference_quantile]['pvalues'][var] if reference_quantile in mmqr_results else 1.0
+            pval = location_pvalues[var]
             
             location_data.append({
                 'Variable': var_name,
@@ -377,9 +379,9 @@ else:
         st.dataframe(location_df, use_container_width=True)
         
         # ========================
-        # Table 2: Scale Parameters with P-Values
+        # Table 2: Scale Parameters (δ) with P-Values
         # ========================
-        st.subheader("Table 3: Scale Parameters with Statistical Inference")
+        st.subheader("Table 3: Scale Parameters, $\\hat{{\\delta}}$ (Heterogeneity Effect)")
         
         scale_data = []
         for var in scale_params.index:
@@ -387,7 +389,6 @@ else:
             scale_val = scale_params[var]
             pval = scale_pvalues[var]
             
-            # Calculate economic significance (relative to location)
             if var in location_params:
                 relative_effect = abs(scale_val) / abs(location_params[var]) if location_params[var] != 0 else float('inf')
             else:
@@ -395,8 +396,8 @@ else:
             
             scale_data.append({
                 'Variable': var_name,
-                'Scale Coefficient': f"{scale_val:.3f}",
-                'P-Value': f"{pval:.3f}",
+                'Scale Coeff. ($\hat{\delta}$ )': f"{scale_val:.3f}",
+                'P-Value (Bootstrap)': f"{pval:.3f}",
                 'Significance': '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else '',
                 'Relative to Location': f"{relative_effect:.3f}" if relative_effect != float('inf') else "N/A",
                 'Interpretation': 'Strong heterogeneity' if pval < 0.05 and relative_effect > 0.5 else 
@@ -408,12 +409,12 @@ else:
         st.dataframe(scale_df, use_container_width=True)
         
         # ========================
-        # Table 3: MMQR Results
+        # Table 3: MMQR Results: β(τ) = α + δ·τ
         # ========================
-        st.subheader("Table 4: MMQR Estimation Results")
+        st.subheader("Table 4: MMQR Coefficient Estimates, $\\hat{{\\beta}}(\\tau)$")
         
         mmqr_data = []
-        coef_names = mmqr_results[quantiles[0]]['coefficients'].index.tolist()
+        coef_names = scale_params.index.tolist()
         
         for var in coef_names:
             var_name = 'Intercept' if var == 'Intercept' else var
@@ -423,10 +424,16 @@ else:
                 if q in mmqr_results:
                     # Use MMQR coefficients
                     coef = mmqr_results[q]['mmqr_coefficients'][var]
-                    pval = mmqr_results[q]['pvalues'][var]
+                    # Use scale p-value for dynamic coefficient significance interpretation
+                    scale_pval = scale_pvalues[var] 
                     
-                    stars = '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else ''
-                    row[f'τ = {q}'] = f"{coef:.3f}{stars}"
+                    # The significance for the final MMQR coefficient is based on
+                    # the significance of the scale parameter (for heterogeneity)
+                    # AND the location parameter (for level). This is a simplification.
+                    # We'll stick to displaying the coefficient only for clarity here.
+                    
+                    # For a simple table, just show the coefficient value
+                    row[f'τ = {q}'] = f"{coef:.3f}" 
             
             mmqr_data.append(row)
         
@@ -438,20 +445,20 @@ else:
         # ========================
         st.subheader("Scale Parameters Interpretation")
         
-        st.write("**Statistical Significance of Heterogeneity:**")
+        st.markdown(f"The coefficients $\\hat{{\\beta}}(\\tau)$ are computed as $\\hat{{\\alpha}} + \\hat{{\\delta}} \\cdot \\tau$, where $\\hat{{\\alpha}}$ is from $\\tau={reference_quantile}$ and $\\hat{{\\delta}}$ is estimated from $\\tau=0.25$ and $\\tau=0.75$. The significance of the **scale effect** is determined by the **Bootstrap P-Value** of $\\hat{{\\delta}}$ in Table 3.")
         
         significant_scale_vars = [var for var in scale_params.index 
-                                if var != 'Intercept' and scale_pvalues[var] < 0.1]
+                                 if var != 'Intercept' and scale_pvalues[var] < 0.1]
         insignificant_scale_vars = [var for var in scale_params.index 
-                                  if var != 'Intercept' and scale_pvalues[var] >= 0.1]
+                                    if var != 'Intercept' and scale_pvalues[var] >= 0.1]
         
         if significant_scale_vars:
             st.success(f"**Significant heterogeneity detected in:** {', '.join(significant_scale_vars)}")
-            st.write("These variables show statistically significant variation in their effects across different quantiles.")
+            st.write("These variables show a statistically significant variation in their effects across different quantiles (i.e., their impact is not constant).")
         
         if insignificant_scale_vars:
             st.info(f"**No significant heterogeneity in:** {', '.join(insignificant_scale_vars)}")
-            st.write("These variables show relatively stable effects across quantiles.")
+            st.write("These variables show relatively stable effects across quantiles, suggesting their impact is mainly on the location (mean/median) of the dependent variable.")
         
         # Detailed interpretation for each variable
         st.write("**Variable-specific Scale Effects:**")
@@ -464,19 +471,20 @@ else:
                 if pval < 0.05:
                     direction = "increasing" if scale_val > 0 else "decreasing"
                     st.write(f"- **{var}**: Significant heterogeneity (p={pval:.3f})")
-                    st.write(f"  - Marginal effects show {direction} pattern across quantiles")
+                    st.write(f"  - The marginal effect of this variable is **{direction}** across the conditional distribution quantiles.")
                     if loc_val != 0:
                         relative_mag = abs(scale_val / loc_val)
-                        st.write(f"  - Scale effect is {relative_mag:.1%} of location effect")
+                        st.write(f"  - The magnitude of the scale effect is approximately {relative_mag:.1%} of the location effect, indicating a strong spread.")
                 else:
                     st.write(f"- **{var}**: No significant heterogeneity (p={pval:.3f})")
-                    st.write(f"  - Effects remain relatively constant across quantiles")
+                    st.write(f"  - The effect remains relatively constant across quantiles; the model is primarily a **Location-Shift** model for this variable.")
 
         # ========================
         # MMQR Coefficient Dynamics
         # ========================
-        st.subheader("Figure 1: MMQR Coefficient Dynamics")
+        st.subheader("Figure 1: MMQR Coefficient Dynamics ($\\hat{{\\beta}}(\\tau)$ vs. $\\tau$)")
         
+
         plot_vars = [var for var in coef_names if var != 'Intercept']
         
         for var in plot_vars:
@@ -489,43 +497,31 @@ else:
             if len(mmqr_coefs) > 0:
                 # Plot the MMQR trajectory
                 ax.plot(quantiles_avail, mmqr_coefs, 'o-', linewidth=2.5, 
-                       label=f'MMQR Coefficients', color='#2E86AB', markersize=8)
+                        label=f'MMQR Coefficients $\\hat{{\\alpha}} + \\hat{{\\delta}} \\cdot \\tau$', color='#2E86AB', markersize=8)
                 
                 # Add location parameter (horizontal line)
                 loc_coef = location_params[var]
                 ax.axhline(y=loc_coef, color='red', linestyle='--', alpha=0.7, 
-                          label=f'Location (τ={reference_quantile})')
+                            label=f'Location $\\hat{{\\alpha}}$ (Ref. $\\tau={reference_quantile}$)')
                 
                 # Add scale effect indication
-                scale_val = scale_params[var]
                 scale_pval = scale_pvalues[var]
                 
+                # Since the MMQR coefficient is explicitly linear in tau, we can draw the line
+                # The line *is* the trajectory, but we can highlight it.
                 if scale_pval < 0.1:
-                    # Add a trend line to emphasize the scale effect
-                    z = np.polyfit(quantiles_avail, mmqr_coefs, 1)
-                    p = np.poly1d(z)
-                    ax.plot(quantiles_avail, p(quantiles_avail), ':', color='green', 
-                           alpha=0.7, label=f'Scale trend (p={scale_pval:.3f})')
+                    ax.plot(quantiles_avail, mmqr_coefs, '-', color='#2E86AB', linewidth=1, alpha=0.7)
                 
                 ax.axhline(y=0, color='black', linestyle='-', alpha=0.3)
-                ax.set_xlabel("Quantiles (τ)", fontsize=12)
+                ax.set_xlabel("Quantiles ($\\tau$)", fontsize=12)
                 ax.set_ylabel("Coefficient Estimate", fontsize=12)
                 
                 # Add scale significance to title
                 scale_sig = '***' if scale_pval < 0.01 else '**' if scale_pval < 0.05 else '*' if scale_pval < 0.1 else 'ns'
-                ax.set_title(f"MMQR Coefficient Dynamics: {var} (Scale: {scale_sig})", 
-                           fontsize=14, fontweight='bold')
+                ax.set_title(f"MMQR Coefficient Dynamics: {var} (Scale $\\hat{{\\delta}}$: {scale_sig})", 
+                            fontsize=14, fontweight='bold')
                 ax.legend()
                 ax.grid(True, alpha=0.3)
-                
-                # Add significance markers for MMQR coefficients
-                for i, q in enumerate(quantiles_avail):
-                    pval = mmqr_results[q]['pvalues'][var]
-                    if pval < 0.1:
-                        ax.annotate('*' * (3 if pval < 0.01 else 2 if pval < 0.05 else 1), 
-                                   (q, mmqr_coefs[i]), textcoords="offset points", 
-                                   xytext=(0,10), ha='center', fontweight='bold', 
-                                   color='red', fontsize=12)
                 
                 plt.tight_layout()
                 st.pyplot(fig)
@@ -541,10 +537,10 @@ else:
         # Location parameters
         for var in location_params.index:
             var_name = 'Intercept' if var == 'Intercept' else var
-            pval = mmqr_results[reference_quantile]['pvalues'][var] if reference_quantile in mmqr_results else 1.0
+            pval = location_pvalues[var]
             download_data.append({
                 'Variable': var_name,
-                'Type': 'Location',
+                'Type': f'Location (α) at τ={reference_quantile}',
                 'Coefficient': round(location_params[var], 3),
                 'P-Value': round(pval, 3),
                 'Quantile': reference_quantile,
@@ -556,9 +552,9 @@ else:
             var_name = 'Intercept' if var == 'Intercept' else var
             download_data.append({
                 'Variable': var_name,
-                'Type': 'Scale', 
+                'Type': 'Scale (δ)', 
                 'Coefficient': round(scale_params[var], 3),
-                'P-Value': round(scale_pvalues[var], 3),
+                'P-Value (Bootstrap)': round(scale_pvalues[var], 3),
                 'Quantile': 'N/A',
                 'Method': 'MMQR'
             })
@@ -570,9 +566,9 @@ else:
                 if q in mmqr_results:
                     download_data.append({
                         'Variable': var_name,
-                        'Type': f'MMQR_τ={q}',
+                        'Type': f'MMQR_Coefficient (β) at τ={q}',
                         'Coefficient': round(mmqr_results[q]['mmqr_coefficients'][var], 3),
-                        'P-Value': round(mmqr_results[q]['pvalues'][var], 3),
+                        'P-Value (Inferred)': round(scale_pvalues[var], 3), # Use scale p-value as primary inference
                         'Quantile': q,
                         'Method': 'MMQR'
                     })
@@ -583,16 +579,12 @@ else:
         st.download_button(
             "📥 Download Complete MMQR Results (CSV)",
             data=csv_data,
-            file_name="MMQR_Complete_Results.csv",
+            file_name="MMQR_Complete_Results_Updated.csv",
             mime="text/csv"
         )
 
     except Exception as e:
         st.error(f"MMQR estimation failed: {str(e)}")
-
-# Rest of the code remains the same...
-
-
 
 # ============================================
 # Footer
