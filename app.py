@@ -293,4 +293,4 @@ st.download_button(
 # ============================================
 
 st.markdown("---")
-st.markdown("**[Make my MMQR results academically readable. Format with coefficient, standard error (in parentheses), and p-value (in brackets). Add significance stars (***, **, *), and give me a Word file** | Built with Streamlit")
+st.markdown("**[Make my MMQR results academically readable. Format with coefficient, standard error (in parentheses), and p-value (in brackets). Add significance stars (***, **, *), and give me a Word file** | [Make my MMQR results academically readable. Format with coefficient, standard error (in parentheses), and p-value (in brackets). Add significance stars (***, **, *), and give me a Word file[Make my MMQR results academically readable. Format with coefficient, standard error (in parentheses), and p-value (in brackets). Add significance stars (***, **, *), and give me a Word file")
