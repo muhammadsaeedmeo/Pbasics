@@ -238,30 +238,22 @@ st.dataframe(scale_table)
 
 # --- Step 5: MMQR Coefficients, SEs, and P-values Across Quantiles ---
 quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-mmqr_coef, mmqr_se, mmqr_p = {}, {}, {}
+mmqr_results = {}
 
 for q in quantiles:
-    coeff_q = location_params + scale_params * q
-    mmqr_coef[q] = coeff_q
-
+    coef_q = location_params + scale_params * q
     se_q = np.sqrt(location_se**2 + (q**2) * scale_se**2)
-    mmqr_se[q] = se_q
+    t_vals = coef_q / se_q
+    p_q = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
 
-    t_vals = coeff_q / se_q
-    p_vals = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
-    mmqr_p[q] = p_vals
+    mmqr_results[q] = pd.DataFrame({
+        f"τ={q} Coef": coef_q.round(3),
+        f"τ={q} Std.Err": se_q.round(3),
+        f"τ={q} P-Value": p_q.round(3)
+    })
 
-# --- Step 6: Combine into one wide table (Coef–Std–P order per quantile) ---
-combined_cols = {}
-for q in quantiles:
-    combined_cols[(f"τ={q}", "Coefficient")] = mmqr_coef[q].round(3)
-    combined_cols[(f"τ={q}", "Std. Error")] = mmqr_se[q].round(3)
-    combined_cols[(f"τ={q}", "P-Value")] = mmqr_p[q].round(3)
-
-mmqr_df = pd.concat(combined_cols, axis=1)
-
-# --- Proper multiindex formatting ---
-mmqr_df.columns = pd.MultiIndex.from_tuples(mmqr_df.columns)
+# --- Step 6: Combine all quantile results side-by-side ---
+mmqr_df = pd.concat(mmqr_results.values(), axis=1)
 st.subheader("MMQR Results: Coefficient – Std. Error – P-Value by Quantile")
 st.dataframe(mmqr_df)
 
@@ -269,7 +261,7 @@ st.dataframe(mmqr_df)
 st.subheader("Coefficient Dynamics by Quantile")
 fig, ax = plt.subplots(figsize=(8, 5))
 for var in indep_vars:
-    ax.plot(quantiles, [mmqr_coef[q][var] for q in quantiles],
+    ax.plot(quantiles, [mmqr_results[q][f"τ={q} Coef"][var] for q in quantiles],
             marker="o", label=var)
 ax.axhline(0, color="black", linewidth=0.8)
 ax.set_xlabel("Quantile (τ)")
