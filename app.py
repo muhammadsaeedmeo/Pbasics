@@ -192,24 +192,25 @@ else:
 
 st.subheader("📊 Method of Moments Quantile Regression (MMQR)")
 
-# Variable selection (user already defined in earlier sections)
 y_var = st.selectbox("Select dependent variable (Y):", df.columns, index=0)
 x_vars = st.multiselect("Select independent variables (X):", [c for c in df.columns if c != y_var])
 
 if y_var and x_vars:
     try:
-        # Normalize data (z-score)
+        # Normalize data
         df_norm = df.copy()
         for col in [y_var] + x_vars:
             df_norm[col] = (df[col] - df[col].mean()) / df[col].std()
 
-        # Create model formula
+        # Build regression formula
         formula = f"{y_var} ~ {' + '.join(x_vars)}"
 
         quantiles = np.arange(0.05, 0.96, 0.05)
         results = []
+
         for tau in quantiles:
-            model = smf.quantreg(formula, df_norm).fit(q=tau)
+            # use the quantreg() you imported
+            model = quantreg(formula, df_norm).fit(q=tau)
             res = pd.DataFrame({
                 "Quantile": tau,
                 "Variable": model.params.index,
