@@ -108,34 +108,20 @@ def plot_distribution(col):
     st.markdown("---")
 
 
-# ---- Combined Plot for All Variables ----
-def combined_distribution_plot(df, numeric_cols):
-    n = len(numeric_cols)
-    cols = 3
-    rows = int(np.ceil(n / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(15, 4 * rows))
-    axes = axes.flatten()
-    
-    for i, col in enumerate(numeric_cols):
-        data = df[col].dropna()
-        sns.kdeplot(data, fill=True, ax=axes[i], color=sns.color_palette("husl", n)[i])
-        axes[i].set_title(col, fontsize=11)
-        axes[i].set_xlabel("")
-        axes[i].set_ylabel("Density")
-    
-    # Remove empty subplots
-    for j in range(i + 1, len(axes)):
-        fig.delaxes(axes[j])
-    
-    plt.suptitle("Combined Distribution of All Variables", fontsize=14, fontweight="bold")
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-    st.pyplot(fig)
-    st.markdown("**Note:** The density plots show each variable’s overall distribution pattern for quick comparison.")
+# Define columns that represent time periods and should not be plotted
+# as continuous variables, regardless of casing.
+COLUMNS_TO_EXCLUDE = ['year', 'Year', 'month', 'Month', 'day', 'Day']
 
+# Filter the list of numeric columns to remove the excluded ones
+plottable_numeric_cols = [
+    col for col in numeric_cols
+    if col.lower() not in (c.lower() for c in COLUMNS_TO_EXCLUDE)
+]
 
 # ---- Logic ----
 if selected_col == "All Variables - Combined Summary Plot":
-    combined_distribution_plot(df, numeric_cols)
+    # Use the filtered list for plotting
+    combined_distribution_plot(df, plottable_numeric_cols)
 else:
     st.subheader(f"Descriptive Analysis for {selected_col}")
     plot_distribution(selected_col)
